@@ -1,6 +1,7 @@
 /**
- * Espaçamentos (múltiplos de 4 e 8), raios e tamanhos de fonte globais.
+ * Espaçamentos (múltiplos de 4 e 8), raios, sombras e tamanhos de fonte globais.
  */
+import { Platform } from 'react-native';
 
 export const spacing = {
   xxs: 4,
@@ -18,6 +19,18 @@ export const radius = {
   lg: 16,
   pill: 999,
 } as const;
+
+/** Sombra de cartões: iOS usa shadow*, Android usa elevation. */
+export const cardShadow = Platform.select({
+  ios: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  android: { elevation: 2 },
+  default: {},
+});
 
 export const fontSize = {
   caption: 12,
