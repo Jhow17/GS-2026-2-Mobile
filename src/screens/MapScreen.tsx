@@ -1,393 +1,453 @@
 /**
- * Tela 4 · Mapa de pontos de apoio e camada do Weather Maps 1.0.
- * Usa MapView nativo (react-native-maps), Marker colorido por tipo, filtros
- * por tipo e por "abertos agora" (useMemo), UrlTile com opacity 0.5 e cartão
- * ao tocar em um marcador.
+ * Tela do Mapa de Pontos de Apoio (corrigida com InteractiveMapView - Opção 1B):
+ * - Mapa base visível no Expo Go (Android e iOS) sem área preta;
+ * - Marcadores categorizados por cor para cada ponto aprovado e ativo;
+ * - Sobreposição de camadas da OpenWeather (Calor, Chuva, Nuvens, Vento);
+ * - Filtros por categoria sem emojis (M1);
+ * - Gaveta inferior com pré-visualização do ponto selecionado e lista ordenada por distância.
  */
-import { useNavigation } from '@react-navigation/native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import MapView, { Marker, UrlTile, type Region } from 'react-native-maps';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import {
+  useNavigation,
+  type CompositeNavigationProp,
+} from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type ListRenderItemInfo,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AppIcon } from '../components/AppIcon';
 import { CustomButton } from '../components/CustomButton';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
+import { InteractiveMapView } from '../components/InteractiveMapView';
 import { Loading } from '../components/Loading';
 import { MapLayerToggle } from '../components/MapLayerToggle';
-import { PermissionNotice } from '../components/PermissionNotice';
-import { DEFAULT_REGION } from '../config/appConfig';
+import { PointListItem } from '../components/PointListItem';
+import { DEFAULT_REGION, HAS_API_KEY } from '../config/appConfig';
 import { useLocation } from '../hooks/useLocation';
 import { useSupportPoints } from '../hooks/useSupportPoints';
 import * as weatherService from '../services/weatherService';
-import { colors, pointTypeColors } from '../theme/colors';
+import { colors } from '../theme/colors';
 import { cardShadow, fontSize, radius, spacing } from '../theme/spacing';
-import type { MapNavigation } from '../types/navigation';
-import type { SupportPoint, SupportPointType } from '../types/supportPoint';
+import type { Coordinates } from '../types/location';
+import type { RootStackParamList, RootTabParamList } from '../types/navigation';
+import type { PointType, SupportPoint } from '../types/supportPoint';
 import type { WeatherTileLayer } from '../types/weather';
-import { calculateDistanceMeters, formatDistance } from '../utils/distance';
-import { pointTypeIcons, pointTypeLabels } from '../utils/formatters';
-import { isOpenNow } from '../utils/time';
+import { calculateDistanceMeters } from '../utils/distance';
+import { pointTypeIconNames, pointTypeLabels } from '../utils/formatters';
 
-type TypeFilter = SupportPointType | 'todos';
+type MapTabProps = BottomTabScreenProps<RootTabParamList, 'Map'>;
 
-interface TypeFilterOption {
-  value: TypeFilter;
-  label: string;
+type MapNavigation = CompositeNavigationProp<
+  MapTabProps['navigation'],
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
+interface PointWithDistance {
+  point: SupportPoint;
+  distanceMeters: number | null;
+  openReports: number;
 }
 
-const TYPE_FILTERS: readonly TypeFilterOption[] = [
-  { value: 'todos', label: 'Todos' },
-  { value: 'bebedouro', label: '🚰 Bebedouros' },
-  { value: 'descanso', label: '🪑 Descanso' },
-  { value: 'sombra', label: '🌳 Sombra' },
-  { value: 'outro', label: '📍 Outros' },
+const FILTER_TYPES: readonly (PointType | 'all')[] = [
+  'all',
+  'bebedouro',
+  'sombra',
+  'descanso',
+  'parceiro',
 ];
 
-export function MapScreen() {
+export function MapScreen({ route }: MapTabProps) {
   const navigation = useNavigation<MapNavigation>();
-  const { coordinates, permission, requestPermission, openSettings } = useLocation({
+  const { points, reports, loading, error, refresh } = useSupportPoints();
+  const { coordinates, permission, requestPermission } = useLocation({
     watch: true,
   });
-  const { points, openReportsByPoint, loading, error, reload } = useSupportPoints();
 
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('todos');
-  const [onlyOpenNow, setOnlyOpenNow] = useState(false);
-  const [selectedLayer, setSelectedLayer] = useState<WeatherTileLayer | null>(null);
+  const [selectedType, setSelectedType] = useState<PointType | 'all'>('all');
+  const [selectedLayer, setSelectedLayer] = useState<WeatherTileLayer | null>(
+    null,
+  );
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
-  const mapRef = useRef<MapView | null>(null);
-  const centeredOnceRef = useRef(false);
+  const [mapCenter, setMapCenter] = useState<Coordinates>({
+    latitude: DEFAULT_REGION.latitude,
+    longitude: DEFAULT_REGION.longitude,
+  });
+  const [mapZoom, setMapZoom] = useState<number>(13);
 
-  // Quando a localização chega pela primeira vez, move a câmera do mapa.
+  // Se recebeu focusPointId via parâmetro de rota, seleciona e centraliza nele
   useEffect(() => {
-    if (coordinates && mapRef.current && !centeredOnceRef.current) {
-      centeredOnceRef.current = true;
-      const nextRegion: Region = {
-        latitude: coordinates.latitude,
-        longitude: coordinates.longitude,
-        latitudeDelta: DEFAULT_REGION.latitudeDelta,
-        longitudeDelta: DEFAULT_REGION.longitudeDelta,
-      };
-      mapRef.current.animateToRegion(nextRegion, 500);
+    const focusId = route.params?.focusPointId;
+    if (!focusId) {
+      return;
     }
-  }, [coordinates]);
+    const target = points.find((item) => item.id === focusId);
+    if (target) {
+      setSelectedPointId(target.id);
+      setMapCenter({ latitude: target.latitude, longitude: target.longitude });
+      setMapZoom(16);
+    }
+  }, [route.params?.focusPointId, points]);
 
-  /** Lista derivada sem mutar o estado original. */
-  const filteredPoints = useMemo<SupportPoint[]>(() => {
-    const now = new Date();
-    return points.filter((point) => {
-      if (typeFilter !== 'todos' && point.type !== typeFilter) {
-        return false;
+  // Centraliza na posição do usuário quando obtida pela primeira vez (se nenhum ponto estiver focado)
+  useEffect(() => {
+    if (coordinates && !route.params?.focusPointId && !selectedPointId) {
+      setMapCenter(coordinates);
+    }
+  }, [coordinates, route.params?.focusPointId, selectedPointId]);
+
+  const openReportCounts = useMemo<Record<string, number>>(() => {
+    const counts: Record<string, number> = {};
+    for (const report of reports) {
+      if (report.status === 'open') {
+        counts[report.pointId] = (counts[report.pointId] ?? 0) + 1;
       }
-      if (onlyOpenNow && !isOpenNow(point, now)) {
-        return false;
+    }
+    return counts;
+  }, [reports]);
+
+  // Somente pontos aprovados e ativos aparecem no mapa público, ordenados por distância
+  const visiblePoints = useMemo<PointWithDistance[]>(() => {
+    const filtered = points.filter(
+      (point) =>
+        point.status === 'approved' &&
+        point.active &&
+        (selectedType === 'all' || point.type === selectedType),
+    );
+    const withDistance = filtered.map((point): PointWithDistance => ({
+      point,
+      distanceMeters: coordinates
+        ? calculateDistanceMeters(coordinates, {
+            latitude: point.latitude,
+            longitude: point.longitude,
+          })
+        : null,
+      openReports: openReportCounts[point.id] ?? 0,
+    }));
+    return [...withDistance].sort((a, b) => {
+      if (a.distanceMeters !== null && b.distanceMeters !== null) {
+        return a.distanceMeters - b.distanceMeters;
       }
-      return true;
+      return a.point.name.localeCompare(b.point.name);
     });
-  }, [points, typeFilter, onlyOpenNow]);
+  }, [points, selectedType, coordinates, openReportCounts]);
+
+  const mapPoints = useMemo<SupportPoint[]>(
+    () => visiblePoints.map((item) => item.point),
+    [visiblePoints],
+  );
 
   const selectedPoint = useMemo<SupportPoint | null>(
-    () => filteredPoints.find((point) => point.id === selectedPointId) ?? null,
-    [filteredPoints, selectedPointId],
-  );
-
-  const referenceCoords = useMemo(
     () =>
-      coordinates ?? {
-        latitude: DEFAULT_REGION.latitude,
-        longitude: DEFAULT_REGION.longitude,
-      },
-    [coordinates],
-  );
-
-  const selectedDistance = useMemo<number | null>(
-    () => (selectedPoint ? calculateDistanceMeters(referenceCoords, selectedPoint) : null),
-    [selectedPoint, referenceCoords],
+      visiblePoints.find((item) => item.point.id === selectedPointId)?.point ??
+      null,
+    [visiblePoints, selectedPointId],
   );
 
   const tileUrlTemplate = useMemo<string>(
-    () => (selectedLayer ? weatherService.getWeatherTileUrl(selectedLayer) : ''),
+    () =>
+      selectedLayer ? weatherService.getWeatherTileUrl(selectedLayer) : '',
     [selectedLayer],
   );
 
-  const tileNotice = useMemo<string | null>(() => {
-    if (!selectedLayer) {
-      return null;
+  const layerNotice =
+    selectedLayer && !HAS_API_KEY
+      ? 'Configure EXPO_PUBLIC_OPENWEATHER_API_KEY no .env para ver a camada da OpenWeather.'
+      : null;
+
+  const handleCenterOnUser = useCallback(async (): Promise<void> => {
+    if (permission !== 'granted') {
+      await requestPermission();
+      return;
     }
-    if (tileUrlTemplate.length === 0) {
-      return 'Camada indisponível no modo demonstração (configure a chave da OpenWeather no .env).';
+    if (coordinates) {
+      setMapCenter({ ...coordinates });
+      setMapZoom(15);
     }
-    return null;
-  }, [selectedLayer, tileUrlTemplate]);
+  }, [permission, requestPermission, coordinates]);
 
-  const handleSelectMarker = useCallback((pointId: string): void => {
-    setSelectedPointId(pointId);
-  }, []);
+  const handleMarkerSelect = useCallback(
+    (pointId: string): void => {
+      setSelectedPointId(pointId);
+      const found = points.find((p) => p.id === pointId);
+      if (found) {
+        setMapCenter({ latitude: found.latitude, longitude: found.longitude });
+        setMapZoom(15);
+      }
+    },
+    [points],
+  );
 
-  const handleOpenDetails = useCallback((): void => {
-    if (selectedPoint) {
-      navigation.navigate('PointDetail', { pointId: selectedPoint.id });
-    }
-  }, [navigation, selectedPoint]);
+  const handleOpenDetail = useCallback(
+    (point: SupportPoint): void => {
+      setSelectedPointId(point.id);
+      navigation.navigate('PointDetail', { pointId: point.id });
+    },
+    [navigation],
+  );
 
-  const handleCloseCard = useCallback((): void => {
-    setSelectedPointId(null);
-  }, []);
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<PointWithDistance>) => (
+      <PointListItem
+        point={item.point}
+        distanceMeters={item.distanceMeters}
+        reportCount={item.openReports}
+        selected={item.point.id === selectedPointId}
+        onPress={handleOpenDetail}
+      />
+    ),
+    [selectedPointId, handleOpenDetail],
+  );
 
-  // Estado 1: Carregando.
+  const keyExtractor = useCallback(
+    (item: PointWithDistance): string => item.point.id,
+    [],
+  );
+
   if (loading && points.length === 0) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <Loading message="Carregando pontos de apoio no mapa..." />
-      </SafeAreaView>
-    );
+    return <Loading message="Carregando pontos de apoio..." />;
   }
 
-  // Estado 2: Erro.
   if (error && points.length === 0) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <ErrorState message={error} onRetry={reload} />
-      </SafeAreaView>
-    );
+    return <ErrorState message={error} onRetry={refresh} />;
   }
-
-  const initialRegion: Region = {
-    latitude: coordinates?.latitude ?? DEFAULT_REGION.latitude,
-    longitude: coordinates?.longitude ?? DEFAULT_REGION.longitude,
-    latitudeDelta: DEFAULT_REGION.latitudeDelta,
-    longitudeDelta: DEFAULT_REGION.longitudeDelta,
-  };
-
-  const selectedOpenNow = selectedPoint ? isOpenNow(selectedPoint, new Date()) : false;
-  const selectedReports = selectedPoint ? (openReportsByPoint[selectedPoint.id] ?? 0) : 0;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.container}>
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          initialRegion={initialRegion}
-          showsUserLocation={permission === 'granted'}
-          showsMyLocationButton={permission === 'granted'}
-        >
-          {selectedLayer && tileUrlTemplate.length > 0 ? (
-            <UrlTile
-              key={selectedLayer}
-              urlTemplate={tileUrlTemplate}
-              opacity={0.5}
-              zIndex={-1}
-              flipY={false}
-              maximumZ={19}
-            />
-          ) : null}
-
-          {filteredPoints.map((point) => (
-            <Marker
-              key={point.id}
-              coordinate={{ latitude: point.latitude, longitude: point.longitude }}
-              title={point.name}
-              description={pointTypeLabels[point.type]}
-              pinColor={pointTypeColors[point.type]}
-              zIndex={2}
-              onPress={() => handleSelectMarker(point.id)}
-            />
-          ))}
-        </MapView>
-
-        <View style={styles.topOverlay} pointerEvents="box-none">
-          {permission !== 'granted' ? (
-            <PermissionNotice
-              title="Localização desativada"
-              description="Permita a localização para centralizar o mapa onde você está."
-              permission={permission}
-              onRequestPermission={requestPermission}
-              onOpenSettings={openSettings}
-            />
-          ) : null}
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterRow}
-          >
-            {TYPE_FILTERS.map((filter) => {
-              const active = typeFilter === filter.value;
-              return (
-                <Pressable
-                  key={filter.value}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  onPress={() => setTypeFilter(filter.value)}
-                  style={[styles.filterChip, active && styles.filterChipActive]}
-                >
-                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-                    {filter.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ selected: onlyOpenNow }}
-              onPress={() => setOnlyOpenNow((current) => !current)}
-              style={[styles.filterChip, onlyOpenNow && styles.filterChipActive]}
-            >
-              <Text style={[styles.filterChipText, onlyOpenNow && styles.filterChipTextActive]}>
-                🕒 Abertos agora
-              </Text>
-            </Pressable>
-          </ScrollView>
-
-          <MapLayerToggle
-            selectedLayer={selectedLayer}
-            onSelectLayer={setSelectedLayer}
-            notice={tileNotice}
+        <View style={styles.mapArea}>
+          <InteractiveMapView
+            center={mapCenter}
+            zoom={mapZoom}
+            points={mapPoints}
+            selectedPointId={selectedPointId}
+            userLocation={permission === 'granted' ? coordinates : null}
+            weatherTileUrlTemplate={tileUrlTemplate}
+            onSelectPoint={handleMarkerSelect}
+            style={styles.map}
           />
+
+          <View style={styles.topOverlay}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsRow}
+            >
+              {FILTER_TYPES.map((type) => {
+                const active = selectedType === type;
+                const label = type === 'all' ? 'Todos' : pointTypeLabels[type];
+                return (
+                  <Pressable
+                    key={type}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    onPress={() => setSelectedType(type)}
+                    style={[styles.chip, active && styles.chipActive]}
+                  >
+                    {type !== 'all' ? (
+                      <AppIcon
+                        name={pointTypeIconNames[type]}
+                        size={14}
+                        color={
+                          active ? colors.textOnPrimary : colors.textSecondary
+                        }
+                      />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.chipText,
+                        active && styles.chipTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <MapLayerToggle
+              selectedLayer={selectedLayer}
+              onSelectLayer={setSelectedLayer}
+              notice={layerNotice}
+            />
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Centralizar na minha localização"
+            onPress={handleCenterOnUser}
+            style={styles.centerButton}
+          >
+            <AppIcon name="navigation" size={16} color={colors.primary} />
+            <Text style={styles.centerButtonText}>Minha posição</Text>
+          </Pressable>
         </View>
 
-        {/* Estado 3: Vazio ("Nenhum ponto na região" / filtro sem resultado). */}
-        {filteredPoints.length === 0 ? (
-          <View style={styles.emptyBanner} accessibilityRole="alert">
-            <Text style={styles.emptyTitle}>Nenhum ponto na região</Text>
-            <Text style={styles.emptySubtitle}>
-              Ajuste os filtros acima ou cadastre um novo espaço na aba Colaborar.
-            </Text>
-          </View>
-        ) : null}
-
-        {selectedPoint ? (
-          <View style={styles.bottomCard}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle} numberOfLines={1}>
-                {pointTypeIcons[selectedPoint.type]} {selectedPoint.name}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Fechar cartão"
-                onPress={handleCloseCard}
-              >
-                <Text style={styles.closeText}>✕</Text>
-              </Pressable>
+        <View style={styles.drawer}>
+          {selectedPoint ? (
+            <View style={styles.previewBar}>
+              <View style={styles.previewInfo}>
+                <Text style={styles.previewLabel}>Ponto selecionado</Text>
+                <Text style={styles.previewTitle} numberOfLines={1}>
+                  {selectedPoint.name}
+                </Text>
+              </View>
+              <CustomButton
+                title="Ver detalhes"
+                compact
+                onPress={() => handleOpenDetail(selectedPoint)}
+              />
             </View>
-            <Text style={styles.cardMeta}>
-              {pointTypeLabels[selectedPoint.type]}
-              {selectedDistance !== null ? ` · ${formatDistance(selectedDistance)}` : ''}
-              {' · '}
-              {selectedOpenNow ? 'Aberto agora' : 'Fechado agora'}
-            </Text>
-            {selectedReports > 0 ? (
-              <Text style={styles.reportWarning}>
-                ⚠️ {selectedReports} relato(s) de problema aberto(s)
-              </Text>
-            ) : null}
-            <CustomButton title="Ver detalhes" compact onPress={handleOpenDetails} />
-          </View>
-        ) : null}
+          ) : null}
+
+          <Text style={styles.drawerTitle}>
+            Pontos no mapa ({visiblePoints.length})
+          </Text>
+          <FlatList
+            data={visiblePoints}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            contentContainerStyle={styles.listContent}
+            ListEmptyComponent={
+              <EmptyState
+                icon="map-pin"
+                title="Nenhum ponto nesta categoria"
+                message="Troque o filtro acima ou sugira um novo ponto na aba Colaborar."
+              />
+            }
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
     backgroundColor: colors.background,
   },
   container: {
     flex: 1,
   },
+  mapArea: {
+    flex: 1.15,
+    position: 'relative',
+  },
   map: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
   },
   topOverlay: {
-    padding: spacing.sm,
+    position: 'absolute',
+    top: spacing.xs,
+    left: spacing.sm,
+    right: spacing.sm,
     gap: spacing.xs,
   },
-  filterRow: {
+  chipsRow: {
     gap: spacing.xs,
     paddingVertical: spacing.xxs,
   },
-  filterChip: {
+  chip: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     ...cardShadow,
   },
-  filterChipActive: {
-    backgroundColor: colors.primaryDark,
-    borderColor: colors.primaryDark,
+  chipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  filterChipText: {
+  chipText: {
     fontSize: fontSize.small,
     fontWeight: '600',
     color: colors.text,
   },
-  filterChipTextActive: {
+  chipTextActive: {
     color: colors.textOnPrimary,
   },
-  emptyBanner: {
+  centerButton: {
     position: 'absolute',
-    bottom: spacing.md,
-    left: spacing.md,
-    right: spacing.md,
+    right: spacing.sm,
+    bottom: spacing.sm,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.xxs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.primary,
     ...cardShadow,
   },
-  emptyTitle: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  emptySubtitle: {
+  centerButtonText: {
     fontSize: fontSize.small,
-    fontWeight: '400',
-    color: colors.textMuted,
+    fontWeight: '700',
+    color: colors.primary,
   },
-  bottomCard: {
-    position: 'absolute',
-    bottom: spacing.md,
-    left: spacing.md,
-    right: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    gap: spacing.xs,
+  drawer: {
+    flex: 0.85,
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
     ...cardShadow,
   },
-  cardHeader: {
+  previewBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
+    backgroundColor: colors.primarySubtle,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    padding: spacing.xs,
+    marginBottom: spacing.xs,
   },
-  cardTitle: {
+  previewInfo: {
     flex: 1,
-    fontSize: fontSize.title,
+  },
+  previewLabel: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.primaryDark,
+    textTransform: 'uppercase',
+  },
+  previewTitle: {
+    fontSize: fontSize.small,
     fontWeight: '700',
     color: colors.text,
   },
-  closeText: {
-    fontSize: fontSize.title,
+  drawerTitle: {
+    fontSize: fontSize.body,
     fontWeight: '700',
-    color: colors.textMuted,
-    paddingHorizontal: spacing.xs,
+    color: colors.text,
+    marginBottom: spacing.xs,
   },
-  cardMeta: {
-    fontSize: fontSize.small,
-    fontWeight: '500',
-    color: colors.textMuted,
-  },
-  reportWarning: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    color: colors.warning,
+  listContent: {
+    paddingBottom: spacing.md,
   },
 });
