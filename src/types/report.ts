@@ -1,23 +1,30 @@
 /**
- * Relatos de bebedouro avariado.
+ * Tipos dos relatos de problema em pontos de apoio (ex.: bebedouro com defeito).
  */
 
-export type ReportStatus = 'aberto' | 'resolvido';
+/** Estado do relato. */
+export type ReportStatus = 'open' | 'resolved';
 
-export interface FountainReport {
+/** Relato salvo no armazenamento local. */
+export interface DefectReport {
   id: string;
   pointId: string;
+  pointName: string;
   description: string;
   photoUri?: string;
-  authorId: string;
-  authorName: string;
   status: ReportStatus;
+  createdBy: string;
+  createdByName: string;
   createdAt: string;
+  /** Metadados de auditoria ao resolver relato (M7). */
+  resolvedBy?: string;
+  resolvedAt?: string;
 }
 
-/** Campos preenchidos pelo formulário de relato. */
+/** Dados do formulário de novo relato. */
 export interface NewReportInput {
   pointId: string;
+  pointName: string;
   description: string;
   photoUri?: string;
 }

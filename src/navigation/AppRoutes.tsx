@@ -1,15 +1,15 @@
 /**
- * Pilha nativa raiz: Tabs, PointDetail, PointForm, MyPlaces e Reviewer.
+ * Pilha principal de navegação: abas na base + telas empilhadas
+ * (detalhe do ponto, formulário de ponto, meus pontos, login e cadastro).
  */
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StyleSheet } from 'react-native';
 
+import { LoginScreen } from '../screens/LoginScreen';
 import { MyPlacesScreen } from '../screens/MyPlacesScreen';
 import { PointDetailScreen } from '../screens/PointDetailScreen';
 import { PointFormScreen } from '../screens/PointFormScreen';
-import { ReviewerScreen } from '../screens/ReviewerScreen';
+import { RegisterScreen } from '../screens/RegisterScreen';
 import { colors } from '../theme/colors';
-import { fontSize } from '../theme/spacing';
 import type { RootStackParamList } from '../types/navigation';
 import { TabRoutes } from './TabRoutes';
 
@@ -19,12 +19,17 @@ export function AppRoutes() {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: styles.header,
-        headerTintColor: colors.textOnPrimary,
-        headerTitleStyle: styles.headerTitle,
+        headerStyle: { backgroundColor: colors.surface },
+        headerTintColor: colors.text,
+        headerTitleStyle: { fontWeight: '700' },
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
-      <Stack.Screen name="Tabs" component={TabRoutes} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="Tabs"
+        component={TabRoutes}
+        options={{ headerShown: false }}
+      />
       <Stack.Screen
         name="PointDetail"
         component={PointDetailScreen}
@@ -33,34 +38,23 @@ export function AppRoutes() {
       <Stack.Screen
         name="PointForm"
         component={PointFormScreen}
-        options={({ route }) => ({
-          title:
-            route.params.mode === 'bebedouro_avariado'
-              ? 'Reportar bebedouro'
-              : 'Novo ponto de apoio',
-        })}
+        options={{ title: 'Ponto de apoio' }}
       />
       <Stack.Screen
         name="MyPlaces"
         component={MyPlacesScreen}
-        options={{ title: 'Meus espaços' }}
+        options={{ title: 'Meus pontos cadastrados' }}
       />
       <Stack.Screen
-        name="Reviewer"
-        component={ReviewerScreen}
-        options={{ title: 'Modo avaliador' }}
+        name="Login"
+        component={LoginScreen}
+        options={{ title: 'Entrar' }}
+      />
+      <Stack.Screen
+        name="Register"
+        component={RegisterScreen}
+        options={{ title: 'Criar conta' }}
       />
     </Stack.Navigator>
   );
 }
-
-const styles = StyleSheet.create({
-  header: {
-    backgroundColor: colors.primary,
-  },
-  headerTitle: {
-    fontSize: fontSize.title,
-    fontWeight: '700',
-    color: colors.textOnPrimary,
-  },
-});

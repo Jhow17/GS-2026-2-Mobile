@@ -1,315 +1,403 @@
 /**
- * Tela 2 · Detalhe público de um ponto de apoio.
- * Mostra nome, tipo, descrição, foto, coordenadas, horário + "aberto agora",
- * comodidades (sombra, água gelada, assentos), distância e aviso de relatos.
- * Botões: "Como chegar" (Platform.select + Linking.openURL) e, só para bebedouros,
- * "Reportar problema" (exige identificação pelo ProfileModal antes de abrir o formulário).
+ * Detalhes de um ponto de apoio (M1, M6, M7):
+ * - Qualquer visitante pode ver todas as informações e traçar rota;
+ * - Para reportar um problema no ponto, exige usuário logado (se visitante,
+ *   redireciona ao Login e retorna automaticamente com o formulário aberto);
+ * - O autor do ponto ou o Administrador podem ativar/desativar o espaço;
+ * - O Administrador conta ainda com atalho direto para editar o ponto.
  */
-import { useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  Alert,
+  Image,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
+import { AppIcon } from '../components/AppIcon';
+import { CameraCapture } from '../components/CameraCapture';
 import { CustomButton } from '../components/CustomButton';
 import { EmptyState } from '../components/EmptyState';
-import { ErrorState } from '../components/ErrorState';
-import { Loading } from '../components/Loading';
-import { ProfileModal } from '../components/ProfileModal';
-import { DEFAULT_REGION } from '../config/appConfig';
-import { useLocation } from '../hooks/useLocation';
+import { FormField } from '../components/FormField';
+import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
 import { useSupportPoints } from '../hooks/useSupportPoints';
-import type { PublicPointLookup } from '../services/supportPointStorage';
 import { colors, pointTypeColors } from '../theme/colors';
 import { cardShadow, fontSize, radius, spacing } from '../theme/spacing';
-import type { PointDetailNavigation, PointDetailRoute } from '../types/navigation';
-import type { SupportPointStatus } from '../types/supportPoint';
-import { calculateDistanceMeters, formatDistance } from '../utils/distance';
-import { formatCoordinates, pointTypeIcons, pointTypeLabels } from '../utils/formatters';
+import type { RootStackParamList } from '../types/navigation';
+import {
+  amenityLabels,
+  formatDateTime,
+  pointStatusLabels,
+  pointTypeIconNames,
+  pointTypeLabels,
+} from '../utils/formatters';
 import { isOpenNow } from '../utils/time';
+import { validateReportInput } from '../utils/validation';
 
-function getUnavailableText(status: Exclude<SupportPointStatus, 'aprovado'>): {
-  title: string;
-  message: string;
-} {
-  switch (status) {
-    case 'em_analise':
-      return {
-        title: 'Ponto em análise',
-        message: 'Este envio ainda está aguardando aprovação e não está visível no mapa público.',
-      };
-    case 'desativado':
-      return {
-        title: 'Espaço desativado',
-        message: 'O responsável desativou temporariamente este ponto de apoio.',
-      };
-    case 'rejeitado':
-      return {
-        title: 'Envio não aprovado',
-        message: 'Este cadastro foi rejeitado na avaliação e não está disponível.',
-      };
-  }
-}
+type Props = NativeStackScreenProps<RootStackParamList, 'PointDetail'>;
 
-export function PointDetailScreen() {
-  const navigation = useNavigation<PointDetailNavigation>();
-  const route = useRoute<PointDetailRoute>();
-  const { pointId } = route.params;
+export function PointDetailScreen({ route, navigation }: Props) {
+  const { pointId, openReportForm } = route.params;
+  const { points, reports, toggleActive, reportDefect } = useSupportPoints();
+  const { session, isAdmin } = useAuth();
+  const { profile } = useProfile();
 
-  const { coordinates } = useLocation();
-  const { profile, saveProfile } = useProfile();
-  const { points, openReportsByPoint, loadPublicPoint } = useSupportPoints();
+  const [reportOpen, setReportOpen] = useState(Boolean(openReportForm));
+  const [reportText, setReportText] = useState('');
+  const [reportPhoto, setReportPhoto] = useState<string | undefined>(undefined);
+  const [reportErrors, setReportErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
-  const [lookup, setLookup] = useState<PublicPointLookup | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [profileModalVisible, setProfileModalVisible] = useState(false);
-
-  const loadDetail = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await loadPublicPoint(pointId);
-      setLookup(result);
-    } catch {
-      setError('Não foi possível carregar os detalhes deste ponto.');
-    } finally {
-      setLoading(false);
-    }
-  }, [loadPublicPoint, pointId]);
-
-  // Recarrega quando o id ou a lista pública do contexto mudam (ex.: desativação).
   useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError(null);
-    loadPublicPoint(pointId)
-      .then((result) => {
-        if (active) {
-          setLookup(result);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setError('Não foi possível carregar os detalhes deste ponto.');
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [loadPublicPoint, pointId, points]);
+    if (openReportForm && session) {
+      setReportOpen(true);
+    }
+  }, [openReportForm, session]);
 
-  const referenceCoords = useMemo(
-    () =>
-      coordinates ?? {
-        latitude: DEFAULT_REGION.latitude,
-        longitude: DEFAULT_REGION.longitude,
-      },
-    [coordinates],
+  const point = useMemo(
+    () => points.find((item) => item.id === pointId),
+    [points, pointId],
   );
 
+  const activeReports = useMemo(
+    () =>
+      reports.filter(
+        (report) => report.pointId === pointId && report.status === 'open',
+      ),
+    [reports, pointId],
+  );
+
+  const isOwner = Boolean(
+    point && session && point.createdBy === session.userId,
+  );
+  const canManageActivation = Boolean(point && (isOwner || isAdmin));
+
   const handleOpenDirections = useCallback(async (): Promise<void> => {
-    if (!lookup || lookup.kind !== 'ok') {
+    if (!point) {
       return;
     }
-    const { latitude, longitude, name } = lookup.point;
-    const encodedName = encodeURIComponent(name);
-    const url = Platform.select({
-      ios: `maps:0,0?q=${encodedName}@${latitude},${longitude}`,
-      android: `geo:0,0?q=${latitude},${longitude}(${encodedName})`,
-      default: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`,
-    });
-
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${point.latitude},${point.longitude}`;
     try {
       await Linking.openURL(url);
     } catch {
-      Alert.alert('Atenção', 'Não foi possível abrir o aplicativo de mapas neste aparelho.');
+      Alert.alert(
+        'Atenção',
+        'Não foi possível abrir o aplicativo de mapas neste aparelho.',
+      );
     }
-  }, [lookup]);
+  }, [point]);
 
-  const handleReportProblem = useCallback((): void => {
-    if (!profile) {
-      setProfileModalVisible(true);
+  const handleToggleActive = useCallback(async (): Promise<void> => {
+    if (!point || !session) {
       return;
     }
-    navigation.navigate('PointForm', { mode: 'bebedouro_avariado', pointId });
-  }, [navigation, pointId, profile]);
+    try {
+      await toggleActive(point.id, !point.active, session.name);
+    } catch {
+      Alert.alert('Atenção', 'Não foi possível atualizar o ponto agora.');
+    }
+  }, [point, session, toggleActive]);
 
-  const handleSaveProfileAndReport = useCallback(
-    async (input: { name: string; contact?: string }) => {
-      const saved = await saveProfile(input);
-      navigation.navigate('PointForm', { mode: 'bebedouro_avariado', pointId });
-      return saved;
-    },
-    [navigation, pointId, saveProfile],
-  );
+  const handleStartReport = useCallback((): void => {
+    if (!point) {
+      return;
+    }
+    if (!session || !profile) {
+      navigation.navigate('Login', {
+        redirectTo: {
+          target: 'PointDetail',
+          params: { pointId: point.id, openReportForm: true },
+        },
+        reasonMessage:
+          'Entre na sua conta para relatar um problema neste ponto de apoio.',
+      });
+      return;
+    }
+    setReportOpen((prev) => !prev);
+    setReportErrors({});
+  }, [point, session, profile, navigation]);
 
-  // Estado 1: Carregando.
-  if (loading) {
+  const handleSendReport = useCallback(async (): Promise<void> => {
+    if (!point || !profile) {
+      return;
+    }
+    const input = {
+      pointId: point.id,
+      pointName: point.name,
+      description: reportText,
+      photoUri: reportPhoto,
+    };
+    const validation = validateReportInput(input);
+    if (!validation.valid) {
+      setReportErrors(validation.errors);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await reportDefect(input, profile);
+      setReportText('');
+      setReportPhoto(undefined);
+      setReportErrors({});
+      setReportOpen(false);
+      Alert.alert(
+        'Relato registrado',
+        'Obrigado por avisar! O problema foi encaminhado para verificação.',
+      );
+    } catch {
+      Alert.alert(
+        'Atenção',
+        'Não foi possível enviar o relato. Tente de novo.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }, [point, profile, reportText, reportPhoto, reportDefect]);
+
+  if (!point) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <Loading message="Carregando detalhes do ponto..." />
-      </SafeAreaView>
+      <EmptyState
+        icon="map-pin"
+        title="Ponto não encontrado"
+        message="Este ponto pode ter sido removido."
+        actionLabel="Voltar"
+        onAction={() => navigation.goBack()}
+      />
     );
   }
 
-  // Estado 2: Erro.
-  if (error) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <ErrorState message={error} onRetry={loadDetail} />
-      </SafeAreaView>
-    );
-  }
-
-  // Estado 3a: Ponto não encontrado.
-  if (!lookup || lookup.kind === 'not_found') {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <EmptyState
-          title="Ponto não encontrado"
-          message="Este ponto de apoio não existe ou foi removido."
-          actionLabel="Voltar"
-          onAction={() => navigation.goBack()}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  // Estado 3b: Ponto desativado, rejeitado ou ainda em análise.
-  if (lookup.kind === 'unavailable') {
-    const unavailable = getUnavailableText(lookup.status);
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <EmptyState
-          title={unavailable.title}
-          message={unavailable.message}
-          actionLabel="Voltar"
-          onAction={() => navigation.goBack()}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  const { point } = lookup;
   const openNow = isOpenNow(point, new Date());
-  const distanceMeters = calculateDistanceMeters(referenceCoords, point);
-  const reportCount = openReportsByPoint[point.id] ?? 0;
+  const scheduleLabel = point.is24h
+    ? 'Aberto 24 horas'
+    : `Das ${point.opensAt} às ${point.closesAt}`;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        {point.photoUri ? (
-          <Image source={{ uri: point.photoUri }} style={styles.photo} />
-        ) : (
-          <View style={[styles.photoPlaceholder, { backgroundColor: pointTypeColors[point.type] }]}>
-            <Text style={styles.photoPlaceholderIcon}>{pointTypeIcons[point.type]}</Text>
-            <Text style={styles.photoPlaceholderText}>{pointTypeLabels[point.type]}</Text>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+      <View style={styles.headerCard}>
+        <View style={styles.headerRow}>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: pointTypeColors[point.type] },
+            ]}
+          >
+            <AppIcon
+              name={pointTypeIconNames[point.type]}
+              size={24}
+              color={colors.textOnPrimary}
+            />
           </View>
-        )}
-
-        <View style={styles.headerCard}>
-          <View style={styles.badgesRow}>
-            <View style={[styles.typeBadge, { backgroundColor: pointTypeColors[point.type] }]}>
-              <Text style={styles.typeBadgeText}>
-                {pointTypeIcons[point.type]} {pointTypeLabels[point.type]}
-              </Text>
-            </View>
-            <View style={[styles.statusBadge, openNow ? styles.openBadge : styles.closedBadge]}>
-              <Text style={[styles.statusText, openNow ? styles.openText : styles.closedText]}>
-                {openNow ? 'Aberto agora' : 'Fechado agora'}
-              </Text>
-            </View>
+          <View style={styles.headerInfo}>
+            <Text style={styles.type}>{pointTypeLabels[point.type]}</Text>
+            <Text style={styles.name}>{point.name}</Text>
           </View>
-
-          <Text style={styles.title}>{point.name}</Text>
-          <Text style={styles.description}>{point.description}</Text>
         </View>
 
-        {reportCount > 0 ? (
-          <View style={styles.warningCard} accessibilityRole="alert">
-            <Text style={styles.warningTitle}>
-              ⚠️ {reportCount} relato(s) de problema em aberto
+        <View style={styles.badges}>
+          <View
+            style={[
+              styles.badge,
+              openNow && point.active ? styles.badgeOpen : styles.badgeClosed,
+            ]}
+          >
+            <AppIcon
+              name="clock"
+              size={13}
+              color={
+                openNow && point.active ? colors.success : colors.textMuted
+              }
+            />
+            <Text
+              style={[
+                styles.badgeText,
+                openNow && point.active
+                  ? styles.badgeOpenText
+                  : styles.badgeClosedText,
+              ]}
+            >
+              {!point.active
+                ? 'Desativado temporariamente'
+                : openNow
+                  ? 'Aberto agora'
+                  : 'Fechado agora'}
             </Text>
-            <Text style={styles.warningSubtitle}>
-              Outros trabalhadores avisaram que este ponto pode estar com defeito ou sem água.
-            </Text>
+          </View>
+
+          {point.status !== 'approved' ? (
+            <View style={[styles.badge, styles.badgePending]}>
+              <Text style={[styles.badgeText, styles.badgePendingText]}>
+                {pointStatusLabels[point.status]}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <Text style={styles.description}>{point.description}</Text>
+
+        <View style={styles.infoBlock}>
+          <View style={styles.infoTitleRow}>
+            <AppIcon name="map-pin" size={14} color={colors.textMuted} />
+            <Text style={styles.infoLabel}>Endereço</Text>
+          </View>
+          <Text style={styles.infoValue}>{point.address}</Text>
+        </View>
+
+        <View style={styles.infoBlock}>
+          <View style={styles.infoTitleRow}>
+            <AppIcon name="clock" size={14} color={colors.textMuted} />
+            <Text style={styles.infoLabel}>Horário de funcionamento</Text>
+          </View>
+          <Text style={styles.infoValue}>{scheduleLabel}</Text>
+        </View>
+
+        {point.amenities.length > 0 ? (
+          <View style={styles.infoBlock}>
+            <Text style={styles.infoLabel}>Estrutura disponível</Text>
+            <View style={styles.amenities}>
+              {point.amenities.map((amenity) => (
+                <View key={amenity} style={styles.amenityChip}>
+                  <AppIcon name="check" size={13} color={colors.primaryDark} />
+                  <Text style={styles.amenityChipText}>
+                    {amenityLabels[amenity]}
+                  </Text>
+                </View>
+              ))}
+            </View>
           </View>
         ) : null}
 
-        <View style={styles.infoCard}>
-          <Text style={styles.sectionTitle}>Informações</Text>
-          <Text style={styles.infoRow}>
-            🕒 Horário:{' '}
-            <Text style={styles.infoBold}>
-              {point.is24h ? 'Aberto 24 horas' : `${point.opensAt} às ${point.closesAt}`}
-            </Text>
-          </Text>
-          <Text style={styles.infoRow}>
-            📏 Distância aproximada:{' '}
-            <Text style={styles.infoBold}>{formatDistance(distanceMeters)}</Text>
-          </Text>
-          <Text style={styles.infoRow}>
-            📍 Coordenadas:{' '}
-            <Text style={styles.infoBold}>
-              {formatCoordinates(point.latitude, point.longitude)}
-            </Text>
-          </Text>
-          <Text style={styles.infoRow}>
-            👤 Cadastrado por: <Text style={styles.infoBold}>{point.ownerName}</Text>
-          </Text>
-        </View>
+        <Text style={styles.meta}>
+          Cadastrado por {point.createdByName} em{' '}
+          {formatDateTime(point.createdAt)}
+          {point.updatedBy && point.updatedAt
+            ? `\nÚltima atualização por ${point.updatedBy} em ${formatDateTime(point.updatedAt)}`
+            : ''}
+        </Text>
 
-        <View style={styles.infoCard}>
-          <Text style={styles.sectionTitle}>Comodidades do local</Text>
-          <View style={styles.amenitiesRow}>
-            <View style={[styles.amenityChip, point.hasShade && styles.amenityActive]}>
-              <Text style={styles.amenityText}>
-                {point.hasShade ? '✅ Sombra' : '❌ Sem sombra'}
+        <View style={styles.routeActions}>
+          <CustomButton
+            title="Traçar rota no mapa externo"
+            icon="external-link"
+            onPress={handleOpenDirections}
+          />
+        </View>
+      </View>
+
+      {point.photoUri ? (
+        <Image source={{ uri: point.photoUri }} style={styles.photo} />
+      ) : null}
+
+      {activeReports.length > 0 ? (
+        <View style={styles.reportsCard}>
+          <View style={styles.reportsHeader}>
+            <AppIcon name="alert-triangle" size={18} color={colors.warning} />
+            <Text style={styles.reportsTitle}>
+              {activeReports.length} relato(s) de problema em aberto
+            </Text>
+          </View>
+          {activeReports.map((report) => (
+            <View key={report.id} style={styles.reportItem}>
+              <Text style={styles.reportDescription}>{report.description}</Text>
+              <Text style={styles.reportMeta}>
+                Por {report.createdByName} · {formatDateTime(report.createdAt)}
               </Text>
             </View>
-            <View style={[styles.amenityChip, point.hasColdWater && styles.amenityActive]}>
-              <Text style={styles.amenityText}>
-                {point.hasColdWater ? '✅ Água gelada' : '❌ Sem água gelada'}
-              </Text>
-            </View>
-            <View style={[styles.amenityChip, point.hasSeating && styles.amenityActive]}>
-              <Text style={styles.amenityText}>
-                {point.hasSeating ? '✅ Assentos' : '❌ Sem assentos'}
-              </Text>
-            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {canManageActivation ? (
+        <View style={styles.ownerCard}>
+          <View style={styles.ownerHeader}>
+            <AppIcon
+              name={isAdmin ? 'shield' : 'user'}
+              size={18}
+              color={colors.primary}
+            />
+            <Text style={styles.sectionTitle}>
+              {isOwner
+                ? 'Este ponto foi cadastrado por você'
+                : 'Gestão Administrativa do Ponto'}
+            </Text>
+          </View>
+          <Text style={styles.ownerHint}>
+            Se o local estiver fechado para manutenção ou reforma, você pode
+            desativá-lo temporariamente do mapa público.
+          </Text>
+          <View style={styles.ownerButtons}>
+            <CustomButton
+              title={
+                point.active ? 'Desativar temporariamente' : 'Reativar ponto'
+              }
+              icon={point.active ? 'eye-off' : 'eye'}
+              variant={point.active ? 'danger' : 'primary'}
+              onPress={handleToggleActive}
+            />
+            {isAdmin ? (
+              <CustomButton
+                title="Editar informações do ponto"
+                icon="edit-2"
+                variant="outline"
+                onPress={() =>
+                  navigation.navigate('PointForm', { editPointId: point.id })
+                }
+              />
+            ) : null}
           </View>
         </View>
+      ) : null}
 
-        <View style={styles.actions}>
-          <CustomButton title="🧭 Como chegar" onPress={handleOpenDirections} />
-          {point.type === 'bebedouro' ? (
-            <CustomButton
-              title="🔧 Reportar problema no bebedouro"
-              variant="outline"
-              onPress={handleReportProblem}
+      <View style={styles.reportCard}>
+        <Text style={styles.sectionTitle}>Encontrou algum problema?</Text>
+        <Text style={styles.ownerHint}>
+          Avise outros trabalhadores e a coordenação caso falte água, haja
+          defeito ou o local esteja fechado.
+        </Text>
+        <CustomButton
+          title={
+            reportOpen ? 'Cancelar relato' : 'Reportar problema neste ponto'
+          }
+          icon={reportOpen ? 'x' : 'alert-triangle'}
+          variant={reportOpen ? 'outline' : 'secondary'}
+          onPress={handleStartReport}
+        />
+
+        {reportOpen ? (
+          <View style={styles.reportForm}>
+            <FormField
+              label="Descreva o problema *"
+              placeholder="Ex.: Bebedouro sem água ou torneira quebrada"
+              multiline
+              value={reportText}
+              onChangeText={setReportText}
+              error={reportErrors.description}
+              maxLength={280}
             />
-          ) : null}
-        </View>
-      </ScrollView>
-
-      <ProfileModal
-        visible={profileModalVisible}
-        initialProfile={profile}
-        onClose={() => setProfileModalVisible(false)}
-        onSave={handleSaveProfileAndReport}
-      />
-    </SafeAreaView>
+            <CameraCapture
+              label="Foto (opcional)"
+              photoUri={reportPhoto}
+              onChangePhoto={setReportPhoto}
+            />
+            <CustomButton
+              title="Enviar relato"
+              icon="check"
+              onPress={handleSendReport}
+              loading={submitting}
+            />
+          </View>
+        ) : null}
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  scroll: {
     flex: 1,
     backgroundColor: colors.background,
   },
@@ -318,102 +406,193 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     gap: spacing.md,
   },
-  photo: {
-    width: '100%',
-    height: 208,
-    borderRadius: radius.lg,
-    backgroundColor: colors.border,
-  },
-  photoPlaceholder: {
-    width: '100%',
-    height: 160,
-    borderRadius: radius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  photoPlaceholderIcon: {
-    fontSize: fontSize.display,
-  },
-  photoPlaceholderText: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    color: colors.textOnPrimary,
-  },
   headerCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: spacing.md,
-    gap: spacing.xs,
+    gap: spacing.sm,
     ...cardShadow,
   },
-  badgesRow: {
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  iconBox: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  type: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.primary,
+    textTransform: 'uppercase',
+  },
+  name: {
+    fontSize: fontSize.heading,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  badges: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.xs,
   },
-  typeBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
-    borderRadius: radius.pill,
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+    borderRadius: radius.xs,
   },
-  typeBadgeText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    color: colors.textOnPrimary,
-  },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
-    borderRadius: radius.pill,
-  },
-  openBadge: {
-    backgroundColor: colors.primaryLight,
-  },
-  closedBadge: {
-    backgroundColor: colors.border,
-  },
-  statusText: {
+  badgeText: {
     fontSize: fontSize.caption,
     fontWeight: '700',
   },
-  openText: {
-    color: colors.primaryDark,
+  badgeOpen: {
+    backgroundColor: colors.successLight,
   },
-  closedText: {
+  badgeOpenText: {
+    color: colors.success,
+  },
+  badgeClosed: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  badgeClosedText: {
     color: colors.textMuted,
   },
-  title: {
-    fontSize: fontSize.heading,
-    fontWeight: '800',
-    color: colors.text,
+  badgePending: {
+    backgroundColor: colors.warningLight,
+  },
+  badgePendingText: {
+    color: colors.warning,
   },
   description: {
     fontSize: fontSize.body,
     fontWeight: '400',
     color: colors.text,
+    lineHeight: 22,
   },
-  warningCard: {
-    backgroundColor: colors.warningLight,
-    borderRadius: radius.md,
+  infoBlock: {
+    gap: 4,
+    paddingTop: spacing.xxs,
+  },
+  infoTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  infoLabel: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+  },
+  infoValue: {
+    fontSize: fontSize.body,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  amenities: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xxs,
+  },
+  amenityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.primarySubtle,
     borderWidth: 1,
-    borderColor: colors.secondary,
-    padding: spacing.md,
-    gap: spacing.xxs,
+    borderColor: colors.primaryLight,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+    borderRadius: radius.xs,
   },
-  warningTitle: {
+  amenityChipText: {
+    fontSize: fontSize.caption,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
+  meta: {
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  routeActions: {
+    marginTop: spacing.xxs,
+  },
+  photo: {
+    width: '100%',
+    height: 220,
+    borderRadius: radius.lg,
+    backgroundColor: colors.border,
+  },
+  reportsCard: {
+    backgroundColor: colors.warningLight,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  reportsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  reportsTitle: {
     fontSize: fontSize.body,
     fontWeight: '700',
     color: colors.warning,
   },
-  warningSubtitle: {
+  reportItem: {
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.warningBorder,
+    gap: 2,
+  },
+  reportDescription: {
     fontSize: fontSize.small,
-    fontWeight: '400',
     color: colors.text,
   },
-  infoCard: {
+  reportMeta: {
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
+  },
+  ownerCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.xs,
+    ...cardShadow,
+  },
+  ownerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  ownerButtons: {
+    gap: spacing.xs,
+    marginTop: spacing.xxs,
+  },
+  reportCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: spacing.md,
     gap: spacing.xs,
     ...cardShadow,
@@ -422,40 +601,14 @@ const styles = StyleSheet.create({
     fontSize: fontSize.title,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: spacing.xxs,
   },
-  infoRow: {
+  ownerHint: {
     fontSize: fontSize.small,
-    fontWeight: '400',
-    color: colors.textMuted,
+    color: colors.textSecondary,
+    lineHeight: 20,
   },
-  infoBold: {
-    fontWeight: '700',
-    color: colors.text,
-  },
-  amenitiesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  reportForm: {
+    marginTop: spacing.sm,
     gap: spacing.xs,
-  },
-  amenityChip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.md,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  amenityActive: {
-    backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
-  },
-  amenityText: {
-    fontSize: fontSize.small,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  actions: {
-    gap: spacing.sm,
   },
 });

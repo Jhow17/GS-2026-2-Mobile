@@ -1,54 +1,33 @@
 /**
- * Rotas tipadas do app (abas + pilha nativa).
+ * Tipos das rotas (abas inferiores e pilha principal), com suporte a
+ * redirecionamento pós-login (M4, M5 e M6).
  */
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { CompositeScreenProps, NavigatorScreenParams } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { PointType } from './supportPoint';
 
-/** Modos do formulário. */
-export type PointFormMode = 'novo_ponto' | 'bebedouro_avariado';
+/** Destino para retomar ação restrita logo após autenticar. */
+export type PostLoginRedirect =
+  | { target: 'PointForm'; params?: { initialCategory?: PointType; editPointId?: string } }
+  | { target: 'PointDetail'; params: { pointId: string; openReportForm?: boolean } }
+  | { target: 'MyPlaces' }
+  | { target: 'Collaborate' }
+  | { target: 'Admin' };
 
-export type TabParamList = {
-  Home: undefined;
-  Map: undefined;
+/** Abas da barra inferior (visibilidade dinâmica conforme perfil na M4). */
+export type RootTabParamList = {
+  Start: undefined;
+  Map: { focusPointId?: string } | undefined;
+  Weather: undefined;
   Collaborate: undefined;
+  Admin: undefined;
+  Account: undefined;
 };
 
+/** Pilha raiz (contém as abas e as telas empilhadas). */
 export type RootStackParamList = {
-  Tabs: NavigatorScreenParams<TabParamList> | undefined;
-  PointDetail: { pointId: string };
-  PointForm: { mode: PointFormMode; pointId?: string };
+  Tabs: undefined;
+  PointDetail: { pointId: string; openReportForm?: boolean };
+  PointForm: { initialCategory?: PointType; editPointId?: string } | undefined;
   MyPlaces: undefined;
-  Reviewer: undefined;
+  Login: { redirectTo?: PostLoginRedirect; reasonMessage?: string } | undefined;
+  Register: { redirectTo?: PostLoginRedirect } | undefined;
 };
-
-/** Props das telas da pilha. */
-export type PointDetailScreenProps = NativeStackScreenProps<RootStackParamList, 'PointDetail'>;
-export type PointFormScreenProps = NativeStackScreenProps<RootStackParamList, 'PointForm'>;
-export type MyPlacesScreenProps = NativeStackScreenProps<RootStackParamList, 'MyPlaces'>;
-export type ReviewerScreenProps = NativeStackScreenProps<RootStackParamList, 'Reviewer'>;
-
-/** Props das telas das abas (podem navegar também para a pilha). */
-export type HomeScreenProps = CompositeScreenProps<
-  BottomTabScreenProps<TabParamList, 'Home'>,
-  NativeStackScreenProps<RootStackParamList>
->;
-export type MapScreenProps = CompositeScreenProps<
-  BottomTabScreenProps<TabParamList, 'Map'>,
-  NativeStackScreenProps<RootStackParamList>
->;
-export type CollaborateScreenProps = CompositeScreenProps<
-  BottomTabScreenProps<TabParamList, 'Collaborate'>,
-  NativeStackScreenProps<RootStackParamList>
->;
-
-/** Tipos usados com useNavigation / useRoute. */
-export type HomeNavigation = HomeScreenProps['navigation'];
-export type MapNavigation = MapScreenProps['navigation'];
-export type CollaborateNavigation = CollaborateScreenProps['navigation'];
-export type PointDetailNavigation = PointDetailScreenProps['navigation'];
-export type PointDetailRoute = PointDetailScreenProps['route'];
-export type PointFormNavigation = PointFormScreenProps['navigation'];
-export type PointFormRoute = PointFormScreenProps['route'];
-export type MyPlacesNavigation = MyPlacesScreenProps['navigation'];
-export type ReviewerNavigation = ReviewerScreenProps['navigation'];
