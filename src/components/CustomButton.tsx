@@ -1,24 +1,34 @@
 /**
- * Botão padrão do app com variantes e estado de carregamento.
+ * Botão padrão inspirado em shadcn/ui com variantes, ícone vetorial opcional,
+ * área mínima de toque >= 44pt e estado de carregamento.
  */
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
+  View,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 
 import { colors } from '../theme/colors';
 import { fontSize, radius, spacing } from '../theme/spacing';
+import type { AppIconName } from '../utils/formatters';
+import { AppIcon } from './AppIcon';
 
-export type CustomButtonVariant = 'primary' | 'secondary' | 'outline' | 'danger';
+export type CustomButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'outline'
+  | 'ghost'
+  | 'danger';
 
 interface CustomButtonProps {
   title: string;
   onPress: () => void;
   variant?: CustomButtonVariant;
+  icon?: AppIconName;
   disabled?: boolean;
   loading?: boolean;
   compact?: boolean;
@@ -30,6 +40,7 @@ export function CustomButton({
   title,
   onPress,
   variant = 'primary',
+  icon,
   disabled = false,
   loading = false,
   compact = false,
@@ -37,7 +48,10 @@ export function CustomButton({
   accessibilityHint,
 }: CustomButtonProps) {
   const isDisabled = disabled || loading;
-  const textColor = variant === 'outline' ? colors.primary : colors.textOnPrimary;
+  const textColor =
+    variant === 'outline' || variant === 'ghost'
+      ? colors.text
+      : colors.textOnPrimary;
 
   return (
     <Pressable
@@ -59,9 +73,24 @@ export function CustomButton({
       {loading ? (
         <ActivityIndicator color={textColor} />
       ) : (
-        <Text style={[styles.text, compact && styles.compactText, { color: textColor }]}>
-          {title}
-        </Text>
+        <View style={styles.contentRow}>
+          {icon ? (
+            <AppIcon
+              name={icon}
+              size={compact ? 16 : 18}
+              color={textColor}
+            />
+          ) : null}
+          <Text
+            style={[
+              styles.text,
+              compact && styles.compactText,
+              { color: textColor },
+            ]}
+          >
+            {title}
+          </Text>
+        </View>
       )}
     </Pressable>
   );
@@ -72,14 +101,20 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   compact: {
-    minHeight: 40,
+    minHeight: 44,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
+  },
+  contentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
   },
   primary: {
     backgroundColor: colors.primary,
@@ -90,7 +125,10 @@ const styles = StyleSheet.create({
   outline: {
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.borderStrong,
+  },
+  ghost: {
+    backgroundColor: 'transparent',
   },
   danger: {
     backgroundColor: colors.danger,
@@ -99,11 +137,11 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   pressed: {
-    opacity: 0.8,
+    opacity: 0.85,
   },
   text: {
     fontSize: fontSize.body,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   compactText: {
     fontSize: fontSize.small,

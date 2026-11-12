@@ -1,7 +1,6 @@
 /**
  * Captura de foto pela câmera (expo-camera) com tratamento formal de permissão
- * concedida, negada e bloqueada. Não acessa services de armazenamento diretamente:
- * devolve o URI pelo callback onCapture.
+ * concedida, negada e bloqueada. Zero emojis (M1).
  */
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCallback, useRef, useState } from 'react';
@@ -102,6 +101,7 @@ export function CameraCapture({
           <View style={styles.previewActions}>
             <CustomButton
               title="Tirar outra"
+              icon="camera"
               variant="outline"
               compact
               onPress={handleOpenCamera}
@@ -109,6 +109,7 @@ export function CameraCapture({
             />
             <CustomButton
               title="Remover"
+              icon="trash-2"
               variant="danger"
               compact
               onPress={handleRemovePhoto}
@@ -118,7 +119,8 @@ export function CameraCapture({
         </View>
       ) : (
         <CustomButton
-          title="📷 Abrir câmera"
+          title="Abrir câmera"
+          icon="camera"
           variant="outline"
           onPress={handleOpenCamera}
         />
@@ -150,6 +152,7 @@ export function CameraCapture({
             />
             <CustomButton
               title="Fotografar"
+              icon="camera"
               onPress={handleTakePicture}
               loading={capturing}
               style={styles.actionButton}
@@ -168,7 +171,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: fontSize.small,
-    fontWeight: '700',
+    fontWeight: '600',
     color: colors.text,
   },
   previewBox: {
