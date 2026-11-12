@@ -1,103 +1,55 @@
-# Decisões Técnicas e Arquiteturais · CitizenTech
+# DECISÕES TÉCNICAS E LIMITES DA PROVA DE CONCEITO
 
-Este documento registra as decisões de arquitetura, algoritmos e limites da prova de conceito (**CitizenTech**), um aplicativo de bolso voltado ao trabalhador conectado exposto ao calor urbano (como entregadores de bicicleta e moto).
-
----
-
-## 1. Por que `react-native-maps` e não `expo-maps` (nem `WebView`)
-
-Escolhemos o `react-native-maps` (`1.27.2`, compatível com o Expo SDK 55) pelos seguintes motivos:
-
-1. **Suporte ao Expo Go sem `WebView`:** `react-native-maps` faz parte dos módulos nativos empacotados no Expo Go, entregando renderização nativa (Apple Maps no iOS e Google Maps no Android) com gestos fluidos, `Marker` com `pinColor` e sobreposição de tiles (`UrlTile`).
-2. **Maturidade frente ao `expo-maps`:** o `expo-maps` exige desenvolvimento com *dev client* customizado em vários cenários e possui API distinta da adotada no repositório da turma.
-3. **Sobreposição meteorológica (`UrlTile`):** o componente `UrlTile` permite acoplar diretamente o modelo `https://tile.openweathermap.org/map/{layer}/{z}/{x}/{y}.png?appid=...` do **Weather Maps 1.0** com `opacity={0.5}`, `zIndex={-1}` (abaixo dos marcadores) e `flipY={false}`. No iOS com Apple Maps, conforme a documentação do `react-native-maps` 1.27.2, a propriedade `zIndex` de `UrlTile` só tem efeito no provedor Google Maps; ainda assim, os `Marker` permanecem renderizados acima dos tiles por padrão. Quando não há chave configurada, a camada é omitida e o `MapLayerToggle` exibe um aviso discreto sem derrubar o mapa.
+Este documento registra as escolhas arquiteturais e os limites conhecidos do **CitizenTech**, mantendo o código enxuto, legível e fiel aos padrões de sala de aula (TypeScript estrito, `StyleSheet.create`, separação entre `screens`, `components`, `contexts`, `hooks`, `services`, `types`, `utils` e `theme`).
 
 ---
 
-## 2. Motor de Regras do Índice de Calor no Cliente (e não Aprendizado de Máquina)
+## 1. Execução 100% no cliente (`AsyncStorage`) e Contas Locais (M5/M6)
 
-O cálculo em `src/services/heatIndexService.ts` **não é um modelo de aprendizado de máquina**: trata-se de um **motor determinístico de regras** baseado na equação oficial do *National Weather Service* (NOAA), combinando a aproximação de **Steadman** e a regressão múltipla de **Rothfusz** com os ajustes para baixa e alta umidade:
-
-1. Converte-se a temperatura $T$ de °C para °F e calcula-se a fórmula simples de Steadman:
-   $$\text{simples} = 0{,}5 \times \left(T + 61{,}0 + (T - 68{,}0)\times 1{,}2 + R \times 0{,}094\right)$$
-2. Se a média $(\text{simples} + T)/2 < 80\ ^\circ\text{F}$, adota-se o valor simples.
-3. Caso contrário, aplica-se a regressão de Rothfusz com o **Ajuste A** ($R < 13\%$ e $80 \le T \le 112\ ^\circ\text{F}$) e o **Ajuste B** ($R > 85\%$ e $80 \le T \le 87\ ^\circ\text{F}$), convertendo o resultado de volta para °C com 1 casa decimal.
-   - *Verificação numérica validada:* $90\ ^\circ\text{F}$ ($32{,}2\ ^\circ\text{C}$) com $70\%$ de umidade produz $\approx 41{,}1\ ^\circ\text{C}$ ($106{,}0\ ^\circ\text{F}$); $25\ ^\circ\text{C}$ com $50\%$ produz $24{,}9\ ^\circ\text{C}$.
-
-### Por que regras explicáveis?
-- **Auditabilidade e confiança:** o trabalhador sabe exatamente por que o cartão está em `cuidado` ou `perigo` (temperatura + umidade + qualidade do ar), sem caixas-pretas.
-- **Execução 100% no cliente e offline:** funções puras e síncronas rodam instantaneamente sobre o clima atual, sobre as 40 faixas de 3 horas da previsão e sobre os pontos monitorados da cidade.
-
-### Combinação entre Calor e Qualidade do Ar
-- O índice de calor gera `heatLevel` (`normal`, `atencao`, `cuidado`, `perigo`, `perigo_extremo`).
-- O índice `aqi` (1 a 5) da Air Pollution API gera `airLevel` separado (`1–2 → normal`, `3 → atencao`, `4 → cuidado`, `5 → perigo`).
-- A função `combineAlerts(heatLevel, airLevel)` adota sempre o **nível mais grave** entre os dois para o `AlertCard` principal, enquanto a tela inicial também exibe um selo exclusivo para a qualidade do ar e concentração de $\text{PM}_{2,5}$.
+- **Como foi feito**: Os sete pontos iniciais de São Paulo (`seed_1` a `seed_7`), os novos pedidos de pontos, os relatos de bebedouros com defeito, as contas de usuários (`@citizentech:v1:accounts`) e a sessão ativa (`@citizentech:v1:session`) ficam salvos no próprio aparelho com `@react-native-async-storage/async-storage`, sob o prefixo `@citizentech:v1:`.
+- **Por que fizemos assim**: Permite demonstrar todo o ciclo (consulta pública $\rightarrow$ login/cadastro com validação de CEP no ViaCEP $\rightarrow$ solicitação de ponto ou relato de defeito $\rightarrow$ moderação administrativa com aprovação, edição, desativação e exclusão) diretamente no Expo Go, sem depender de servidor próprio ou banco em nuvem.
+- **Aviso de Segurança (Conta de Administrador Semeada)**:
+  - A conta de administrador (`admin@citizentech.org` / `Admin@2026`, configurável via `EXPO_PUBLIC_ADMIN_EMAIL` e `EXPO_PUBLIC_ADMIN_PASSWORD`) não pode ser criada pela tela pública de cadastro; ela é semeada automaticamente na inicialização do `authStorage.ts` com hash determinístico local.
+  - **Limite conhecido**: Em qualquer aplicação 100% client-side, variáveis `EXPO_PUBLIC_*` e dados no `AsyncStorage` residem no dispositivo do usuário. Em um ambiente de produção real, a autenticação, o hash de senhas (Argon2/bcrypt) e a verificação de papel (`role === 'admin'`) devem ocorrer obrigatoriamente em um backend seguro (API REST + JWT/OAuth2).
 
 ---
 
-## 3. Perfil "Trabalhador na Rua" e Deslocamento das Faixas
+## 2. Privacidade e Minimização de Dados (LGPD) no Cadastro por CEP
 
-As faixas tradicionais de índice de calor (27 °C, 32 °C, 39 °C e 52 °C) pressupõem uma pessoa em sombra leve e sem esforço físico intenso. Entregadores de bicicleta ou moto sob sol direto e trânsito pesado sofrem estresse térmico antes desses limiares.
-
-Por isso, quando o interruptor **"Perfil trabalhador na rua"** está ativo, `getAlertLevel(heatIndexC, true)` desconta `WORKER_PROFILE_OFFSET_C = 2` °C de todos os limites (25 °C, 30 °C, 37 °C e 50 °C), antecipando os avisos de hidratação e pausa na sombra.
-
----
-
-## 4. Camada de Services e Futura Troca por Sensores ESP32
-
-Nenhuma tela ou componente importa `axios`, `@react-native-async-storage/async-storage` ou `expo-location` diretamente:
-
-- `src/types/openWeather.ts` isola o contrato bruto da OpenWeather.
-- `src/services/weatherService.ts` converte as respostas brutas (`mapCurrent`, `mapForecast`, `mapAirQuality`) para os modelos de domínio em `src/types/weather.ts` (`WeatherReading`, `ForecastSlot`, `AirQuality`, `WeatherBundle`).
-- `src/services/mockWeatherService.ts` implementa exatamente as mesmas assinaturas com dados determinísticos para desenvolvimento sem chave ou demonstração sem internet.
-
-**Evolução para sensores IoT (ESP32):** quando a solução integrada incluir estações meteorológicas urbanas com ESP32 (medindo temperatura e umidade em pontos de parada de entregadores) servidas por uma API própria, bastará criar um `iotWeatherService.ts` ou apontar `weatherService.ts` para o novo endpoint mantendo `WeatherReading` intacto — sem tocar em `HomeScreen`, `MapScreen` ou `heatIndexService`.
+- **Como foi feito**: Ao criar uma conta (`RegisterScreen.tsx`), o usuário informa o CEP (`00000-000`), validado em tempo real na API pública gratuita **ViaCEP** (`https://viacep.com.br/ws/{cep}/json/`).
+- **Minimização de dados**: Embora o ViaCEP confirme a existência do CEP e retorne o logradouro, na conta do trabalhador (`UserAccount`) armazenamos apenas o **CEP, bairro, cidade e UF** para referência regional, sem exigir número residencial pessoal.
 
 ---
 
-## 5. Estratégia de Cache (10 e 30 minutos) e Fallback Offline
+## 3. Solução Definitiva do Mapa no Expo Go (`InteractiveMapView.tsx`)
 
-Em `src/services/cacheStorage.ts`, cada leitura é gravada em `@citizentech:v1:cache:<tipo>:<lat>:<lon>` com coordenadas arredondadas a **2 casas decimais** ($\approx 1{,}1\text{ km}$):
-
-- **Clima atual e qualidade do ar:** TTL de **10 minutos**.
-- **Previsão de 5 dias / 3 horas (40 faixas):** TTL de **30 minutos**.
-- Pequenos deslocamentos do entregador dentro do mesmo bairro reaproveitam o cache e economizam franquia de dados e cota da OpenWeather.
-- Se a chamada de rede falhar e existir um cache vencido (`getStale`), o `weatherService` devolve os dados antigos com `isStale: true`, e a `HomeScreen` exibe o aviso *"Sem conexão: mostrando dados salvos de HH:mm"*.
-- Toda leitura do `AsyncStorage` passa por `JSON.parse` dentro de `try/catch` e por **guardas de tipo** (`isWeatherReading`, `isAirQuality`, `isForecastSlotList`, `isSupportPoint`, `isCitizenProfile`, `isFountainReport`), nunca por `as Tipo`.
-
----
-
-## 6. Persistência de Fotos no Expo SDK 55 (`expo-file-system`)
-
-No Expo SDK 55, a API legada `copyAsync`/`documentDirectory` do `expo-file-system` foi substituída pela API orientada a objetos (`File`, `Directory` e `Paths.document`). Em `src/services/photoService.ts`, usamos `new Directory(Paths.document, 'citizentech-photos')` e `source.copy(destination)` para copiar a foto capturada pela câmera do cache temporário para o diretório persistente de documentos do app.
+- **Diagnóstico do problema anterior**: No Android sob Expo SDK 55 (`react-native 0.83.10`, New Architecture / Fabric), o `react-native-maps` utiliza o Google Maps SDK nativo por padrão. Sem uma chave `android.config.googleMaps.apiKey` vinculada a uma conta de faturamento no Google Cloud e compilada em uma *Development Build*, o motor OpenGL do Google Maps exibe apenas o logotipo `"Google"` no canto inferior sobre um canvas preto, sem carregar os tiles nem desenhar os marcadores.
+- **Como foi resolvido (Opção 1B)**: Implementamos o componente [`InteractiveMapView.tsx`](file:///C:/Users/Jonathan%20Silva/FIAP/GS/Mobile/src/components/InteractiveMapView.tsx) utilizando `react-native-webview` + Leaflet 1.9 + tiles vetoriais/raster abertos (Carto Voyager / OpenStreetMap) + sobreposição de camadas da OpenWeather (`UrlTile` equivalente).
+- **Vantagens**:
+  1. Funciona **100% no Expo Go** (Android e iOS) sem risco de tela preta e sem exigir cartão de crédito no Google Cloud;
+  2. Exibe marcadores coloridos por categoria (`bebedouro`, `sombra`, `descanso`, `parceiro`), posição do usuário e camadas climáticas (`temp_new`, `precipitation_new`, `clouds_new`, `wind_new`);
+  3. Serve também como mini-mapa interativo no formulário de pontos (`PointFormScreen.tsx`), permitindo tocar ou arrastar o pino para ajustar a coordenada exata.
 
 ---
 
-## 7. Limitações de Segurança da Prova de Conceito (100% no Cliente)
+## 4. Endereço por CEP e Geocodificação em Cascata (M8)
 
-Por restrição da prova de conceito, toda a persistência ocorre no `AsyncStorage` do próprio aparelho e não há backend:
-
-1. **Modo avaliador não é seguro:** o interruptor *"Modo avaliador (demonstração)"* na aba Colaborar apenas grava um booleano local (`@citizentech:v1:reviewer_mode`) para permitir demonstrar em aula o fluxo completo (*ponto enviado → em análise → aprovado → visível no mapa*).
-2. **Posse e desativação de pontos:** o controle de quem é dono (`ownerId === profile.id`) depende do perfil salvo localmente (`@citizentech:v1:profile`). Se o usuário limpar os dados do app, perderá o vínculo com o `id` anterior.
-3. **Dados não compartilhados entre aparelhos:** pontos cadastrados, aprovações e relatos de bebedouros avariados ficam apenas no dispositivo onde foram criados.
-4. **Chave da OpenWeather no cliente:** variáveis `EXPO_PUBLIC_OPENWEATHER_API_KEY` são embutidas no pacote JavaScript do app. Para mitigar exposição acidental em logs ou telas, `src/services/api.ts` injeta `appid` via interceptor em `config.params` e registra apenas método, `config.url` e status HTTP — jamais a chave ou parâmetros.
-
----
-
-## 8. Tratamento Formal de Permissões Nativas
-
-Tanto localização (`expo-location` via `locationService.ts` e `useLocation.ts`) quanto câmera (`expo-camera` via `CameraCapture.tsx`) distinguem explicitamente:
-
-- `granted`: recurso liberado (`showsUserLocation` no mapa, captura de foto na câmera).
-- `undetermined` / `denied` (`canAskAgain === true`): exibe o `PermissionNotice` com botão **"Permitir"**, que aciona o diálogo nativo.
-- `blocked` (`canAskAgain === false`) ou `services_disabled`: exibe explicação clara e botão **"Abrir configurações"** (`Linking.openSettings()`), revalidando o estado automaticamente quando o usuário retorna ao app (`AppState`).
-- Sem permissão de localização, o app **nunca trava**: utiliza `DEFAULT_REGION` (Praça da Sé, SP) e permite posicionar novos pontos tocando diretamente no mini mapa do formulário.
+- **Como foi feito**: No cadastro/edição de ponto de apoio (`PointFormScreen.tsx`), o usuário pode escolher entre **"Informar endereço (CEP)"** e **"Usar meu GPS"**.
+- **Cascata de Geocodificação (`geocodingService.ts`)**:
+  1. Tenta primeiro `Location.geocodeAsync` (`expo-location`) quando a permissão de GPS está ativa (alta precisão para rua + número);
+  2. Caso a permissão de GPS tenha sido negada ou não retorne resultado, consulta o geocodificador aberto **Nominatim (OpenStreetMap)** via HTTP com cabeçalho `User-Agent` identificado;
+  3. Como terceiro nível de segurança, consulta a **BrasilAPI CEP v2** (`/api/cep/v2/{cep}`), que fornece coordenadas geográficas do CEP, posicionando o pino no mini-mapa para confirmação ou ajuste manual.
 
 ---
 
-## 9. O que Seria Feito em Produção com um Backend
+## 5. Educação em Saúde Térmica e Fontes Oficiais (M2 e M3)
 
-Em uma versão de produção:
-- **Autenticação e papéis reais:** login leve (OAuth / OTP por telefone) para autores e controle de acesso baseado em papéis (RBAC) no servidor para moderadores.
-- **Banco geoespacial compartilhado:** PostgreSQL + PostGIS (ou serviço equivalente) para busca por raio, paginação e sincronização entre todos os usuários da cidade, além de armazenamento de fotos em *object storage* com CDN.
-- **Proxy para OpenWeather + ingestão IoT:** um backend intermediaria as chamadas à OpenWeather (mantendo a API key secreta no servidor e fazendo cache compartilhado por célula geográfica) e receberia telemetria MQTT/HTTP das estações ESP32 instaladas na cidade.
+- **Índice de Calor (`heatIndexService.ts` + `HeatIndexInfoModal.tsx`)**: Calcula o índice pela equação de Rothfusz (NWS / NOAA) e apresenta ao usuário, a 1 toque do `AlertCard`, a diferença entre Temperatura, Sensação Térmica e Índice de Calor, além das 5 faixas de risco (`Normal`, `Atenção`, `Cuidado`, `Perigo` e `Perigo Extremo`) com o ajuste de `-2 °C` para quem trabalha na rua.
+- **Dicas de Proteção (`HeatProtectionModal.tsx`)**: Exibidas nos níveis `cuidado`, `perigo` e `perigo_extremo`, com orientações práticas para entregadores, sinais de exaustão térmica vs. insolação, botão de chamada rápida para o **SAMU (192)**, atalho direto para o **ponto de apoio mais próximo** e citação das recomendações oficiais do **Ministério da Saúde do Brasil** e da **OMS / NIOSH**.
+
+---
+
+## 6. Sistema Visual inspirado em shadcn/ui e Zero Emojis (M1)
+
+- Todos os emojis foram removidos do código e substituídos por ícones vetoriais padronizados (`@expo/vector-icons/Feather`) encapsulados em `src/components/AppIcon.tsx`.
+- A estilização permanece 100% em `StyleSheet.create`, com tokens centralizados em `src/theme/colors.ts` e `src/theme/spacing.ts` (superfícies neutras `slate`, bordas de `1px`, contraste `>= 4.5:1` e áreas mínimas de toque `>= 44pt`).
