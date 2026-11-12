@@ -1,304 +1,469 @@
 /**
- * Pontos de apoio no AsyncStorage (@citizentech:v1:support_points).
- * Toda escrita lê a lista, copia com spread e regrava a lista inteira.
- * As regras de negócio de status (dono x avaliador) também ficam aqui.
+ * Persistência dos pontos de apoio no AsyncStorage e semeadura inicial
+ * de sete pontos reais de São Paulo na primeira execução.
+ * Inclui suporte a edição completa, exclusão administrativa e trilha de auditoria (M7/M8).
  */
 import type { CitizenProfile } from '../types/profile';
 import type {
+  Amenity,
   NewSupportPointInput,
+  PointAddress,
+  PointStatus,
+  PointType,
   SupportPoint,
-  SupportPointStatus,
 } from '../types/supportPoint';
+import { formatStructuredAddress } from '../utils/formatters';
 import { generateId } from '../utils/generateId';
-import { isArrayOf, isSupportPoint, validatePointInput } from '../utils/validation';
-import { getReviewerMode } from './profileStorage';
-import { hasStoredKey, readStoredJson, STORAGE_PREFIX, writeStoredJson } from './cacheStorage';
+import { isRecord, isValidCoordinates } from '../utils/validation';
+import {
+  hasStoredKey,
+  readStoredJson,
+  STORAGE_PREFIX,
+  writeStoredJson,
+} from './cacheStorage';
 
-const POINTS_KEY = `${STORAGE_PREFIX}support_points`;
+const POINTS_KEY = `${STORAGE_PREFIX}points`;
+const DELETED_SEEDS_KEY = `${STORAGE_PREFIX}deleted_seeds`;
 
-/** Resultado da busca de um ponto para o detalhe público. */
-export type PublicPointLookup =
-  | { kind: 'ok'; point: SupportPoint }
-  | { kind: 'not_found' }
-  | { kind: 'unavailable'; status: Exclude<SupportPointStatus, 'aprovado'> };
+const VALID_TYPES: readonly PointType[] = ['bebedouro', 'sombra', 'descanso', 'parceiro'];
+const VALID_STATUSES: readonly PointStatus[] = ['pending', 'approved', 'rejected'];
+const VALID_AMENITIES: readonly Amenity[] = [
+  'agua_potavel',
+  'banheiro',
+  'banco',
+  'tomada',
+  'sombra_coberta',
+  'ar_condicionado',
+];
 
-function isPointList(value: unknown): value is SupportPoint[] {
-  return isArrayOf(value, isSupportPoint);
+// ---------------------------------------------------------------------------
+// Sete pontos iniciais em São Paulo (aprovados e ativos)
+// ---------------------------------------------------------------------------
+
+const SEED_POINTS: readonly SupportPoint[] = [
+  {
+    id: 'seed_1',
+    type: 'bebedouro',
+    name: 'Bebedouro Público — Praça da Sé',
+    description: 'Ponto de água potável gratuito próximo à saída do metrô Sé.',
+    address: 'Praça da Sé, s/n - Sé, São Paulo/SP · CEP 01001-000',
+    structuredAddress: {
+      cep: '01001-000',
+      street: 'Praça da Sé',
+      number: 'S/N',
+      neighborhood: 'Sé',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5503,
+    longitude: -46.6339,
+    opensAt: '06:00',
+    closesAt: '22:00',
+    is24h: false,
+    amenities: ['agua_potavel', 'banco'],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'Prefeitura / Sabesp',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+  {
+    id: 'seed_2',
+    type: 'sombra',
+    name: 'Marquise e Bosque — Parque Ibirapuera (Portão 3)',
+    description: 'Área arborizada com sombra densa, bebedouros e sanitários gratuitos.',
+    address: 'Av. Pedro Álvares Cabral, s/n - Vila Mariana, São Paulo/SP · CEP 04094-050',
+    structuredAddress: {
+      cep: '04094-050',
+      street: 'Av. Pedro Álvares Cabral',
+      number: 'S/N',
+      complement: 'Portão 3',
+      neighborhood: 'Vila Mariana',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5874,
+    longitude: -46.6576,
+    opensAt: '05:00',
+    closesAt: '23:00',
+    is24h: false,
+    amenities: ['agua_potavel', 'banheiro', 'banco', 'sombra_coberta'],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'CitizenTech',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+  {
+    id: 'seed_3',
+    type: 'descanso',
+    name: 'Ponto de Apoio ao Entregador — Paulista',
+    description: 'Espaço coberto com bancos, água gelada e tomadas para recarga de celular.',
+    address: 'Av. Paulista, 1374 - Bela Vista, São Paulo/SP · CEP 01310-100',
+    structuredAddress: {
+      cep: '01310-100',
+      street: 'Av. Paulista',
+      number: '1374',
+      neighborhood: 'Bela Vista',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5629,
+    longitude: -46.6544,
+    opensAt: '08:00',
+    closesAt: '22:00',
+    is24h: false,
+    amenities: ['agua_potavel', 'banheiro', 'banco', 'tomada', 'sombra_coberta'],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'CitizenTech',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+  {
+    id: 'seed_4',
+    type: 'parceiro',
+    name: 'Padaria Estrela do Tatuapé (Ponto Parceiro)',
+    description: 'Oferece reabastecimento de garrafa de água e uso do banheiro para entregadores.',
+    address: 'Rua Tuiuti, 2100 - Tatuapé, São Paulo/SP · CEP 03307-005',
+    structuredAddress: {
+      cep: '03307-005',
+      street: 'Rua Tuiuti',
+      number: '2100',
+      neighborhood: 'Tatuapé',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5408,
+    longitude: -46.5752,
+    opensAt: '06:00',
+    closesAt: '21:00',
+    is24h: false,
+    amenities: ['agua_potavel', 'banheiro', 'sombra_coberta'],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'Comércio Parceiro',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+  {
+    id: 'seed_5',
+    type: 'bebedouro',
+    name: 'Largo da Batata — Estação de Hidratação',
+    description: 'Bebedouro público ao lado da saída da estação Faria Lima.',
+    address: 'Av. Brigadeiro Faria Lima, s/n - Pinheiros, São Paulo/SP · CEP 05426-100',
+    structuredAddress: {
+      cep: '05426-100',
+      street: 'Av. Brigadeiro Faria Lima',
+      number: 'S/N',
+      neighborhood: 'Pinheiros',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5672,
+    longitude: -46.6952,
+    opensAt: '00:00',
+    closesAt: '23:59',
+    is24h: true,
+    amenities: ['agua_potavel', 'banco'],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'Prefeitura / Sabesp',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+  {
+    id: 'seed_6',
+    type: 'sombra',
+    name: 'Parque da Juventude — Área de Descanso',
+    description: 'Gramado arborizado com quiosques cobertos e bebedouros.',
+    address: 'Av. Cruzeiro do Sul, 2630 - Santana, São Paulo/SP · CEP 02030-100',
+    structuredAddress: {
+      cep: '02030-100',
+      street: 'Av. Cruzeiro do Sul',
+      number: '2630',
+      neighborhood: 'Santana',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5072,
+    longitude: -46.6245,
+    opensAt: '06:00',
+    closesAt: '19:00',
+    is24h: false,
+    amenities: ['agua_potavel', 'banheiro', 'banco', 'sombra_coberta'],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'CitizenTech',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+  {
+    id: 'seed_7',
+    type: 'parceiro',
+    name: 'Centro Cultural São Paulo — Área de Convivência',
+    description: 'Espaço ventilado e gratuito com água potável, bancos, tomadas e banheiros.',
+    address: 'Rua Vergueiro, 1000 - Liberdade, São Paulo/SP · CEP 01504-000',
+    structuredAddress: {
+      cep: '01504-000',
+      street: 'Rua Vergueiro',
+      number: '1000',
+      neighborhood: 'Liberdade',
+      city: 'São Paulo',
+      state: 'SP',
+    },
+    latitude: -23.5712,
+    longitude: -46.6398,
+    opensAt: '10:00',
+    closesAt: '20:00',
+    is24h: false,
+    amenities: [
+      'agua_potavel',
+      'banheiro',
+      'banco',
+      'tomada',
+      'sombra_coberta',
+      'ar_condicionado',
+    ],
+    status: 'approved',
+    active: true,
+    createdBy: 'seed',
+    createdByName: 'Equipamento Público',
+    createdAt: '2026-01-10T10:00:00.000Z',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Guardas de tipo
+// ---------------------------------------------------------------------------
+
+function isPointType(value: unknown): value is PointType {
+  return typeof value === 'string' && (VALID_TYPES as readonly string[]).includes(value);
 }
 
-/** Pontos de exemplo criados na primeira execução (PLACEHOLDERS em São Paulo). */
-function buildSeedPoints(): SupportPoint[] {
-  const now = new Date().toISOString();
-  const base = {
-    status: 'aprovado' as const,
-    ownerId: 'seed',
-    ownerName: 'Equipe CitizenTech',
-    createdAt: now,
-    updatedAt: now,
-  };
-  return [
-    {
-      ...base,
-      id: 'seed_1',
-      type: 'bebedouro',
-      name: 'Bebedouro da Praça da Sé',
-      description: 'Bebedouro público ao lado da catedral, perto do ponto de táxi.',
-      latitude: -23.5503,
-      longitude: -46.6340,
-      is24h: true,
-      opensAt: '00:00',
-      closesAt: '23:59',
-      hasShade: false,
-      hasColdWater: true,
-      hasSeating: false,
-    },
-    {
-      ...base,
-      id: 'seed_2',
-      type: 'descanso',
-      name: 'Ponto de apoio Paulista',
-      description: 'Espaço coberto com tomadas e bancos para entregadores fazerem pausas.',
-      latitude: -23.5618,
-      longitude: -46.6565,
-      is24h: false,
-      opensAt: '08:00',
-      closesAt: '22:00',
-      hasShade: true,
-      hasColdWater: true,
-      hasSeating: true,
-    },
-    {
-      ...base,
-      id: 'seed_3',
-      type: 'sombra',
-      name: 'Árvores do Largo do Arouche',
-      description: 'Área arborizada com bancos de praça e boa sombra à tarde.',
-      latitude: -23.5428,
-      longitude: -46.6450,
-      is24h: true,
-      opensAt: '00:00',
-      closesAt: '23:59',
-      hasShade: true,
-      hasColdWater: false,
-      hasSeating: true,
-    },
-    {
-      ...base,
-      id: 'seed_4',
-      type: 'bebedouro',
-      name: 'Bebedouro do Parque Ibirapuera',
-      description: 'Bebedouro perto do portão 3, ao lado dos banheiros públicos.',
-      latitude: -23.5869,
-      longitude: -46.6580,
-      is24h: false,
-      opensAt: '05:00',
-      closesAt: '00:00',
-      hasShade: true,
-      hasColdWater: false,
-      hasSeating: true,
-    },
-    {
-      ...base,
-      id: 'seed_5',
-      type: 'descanso',
-      name: 'Base de entregadores Pinheiros',
-      description: 'Área de descanso com água, banheiro e estacionamento para motos.',
-      latitude: -23.5665,
-      longitude: -46.6925,
-      is24h: false,
-      opensAt: '10:00',
-      closesAt: '02:00',
-      hasShade: true,
-      hasColdWater: true,
-      hasSeating: true,
-    },
-    {
-      ...base,
-      id: 'seed_6',
-      type: 'sombra',
-      name: 'Marquise da Galeria do Rock',
-      description: 'Marquise ampla para se proteger do sol e da chuva no centro.',
-      latitude: -23.5440,
-      longitude: -46.6385,
-      is24h: false,
-      opensAt: '09:00',
-      closesAt: '19:00',
-      hasShade: true,
-      hasColdWater: false,
-      hasSeating: false,
-    },
-    {
-      ...base,
-      id: 'seed_7',
-      type: 'bebedouro',
-      name: 'Bebedouro da Estação Brás',
-      description: 'Bebedouro na saída da estação, perto da bilheteria do metrô.',
-      latitude: -23.5450,
-      longitude: -46.6160,
-      is24h: false,
-      opensAt: '04:40',
-      closesAt: '00:00',
-      hasShade: true,
-      hasColdWater: true,
-      hasSeating: false,
-    },
-  ];
+function isPointStatus(value: unknown): value is PointStatus {
+  return typeof value === 'string' && (VALID_STATUSES as readonly string[]).includes(value);
 }
 
-/** Cria os pontos de exemplo somente na primeira execução. */
-export async function ensureSeed(): Promise<void> {
-  const exists = await hasStoredKey(POINTS_KEY);
-  if (!exists) {
-    await writeStoredJson(POINTS_KEY, buildSeedPoints());
+function isAmenityList(value: unknown): value is Amenity[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item): item is Amenity =>
+        typeof item === 'string' && (VALID_AMENITIES as readonly string[]).includes(item),
+    )
+  );
+}
+
+function isSupportPoint(value: unknown): value is SupportPoint {
+  if (!isRecord(value)) {
+    return false;
   }
+  return (
+    typeof value.id === 'string' &&
+    isPointType(value.type) &&
+    typeof value.name === 'string' &&
+    typeof value.description === 'string' &&
+    typeof value.address === 'string' &&
+    isValidCoordinates(value.latitude, value.longitude) &&
+    typeof value.opensAt === 'string' &&
+    typeof value.closesAt === 'string' &&
+    typeof value.is24h === 'boolean' &&
+    isAmenityList(value.amenities) &&
+    isPointStatus(value.status) &&
+    typeof value.active === 'boolean' &&
+    typeof value.createdBy === 'string' &&
+    typeof value.createdByName === 'string' &&
+    typeof value.createdAt === 'string'
+  );
 }
 
-/** Todos os pontos, em qualquer status (uso interno e do avaliador). */
-export async function getAllPoints(): Promise<SupportPoint[]> {
-  return readStoredJson(POINTS_KEY, isPointList, []);
+function isSupportPointList(value: unknown): value is SupportPoint[] {
+  return Array.isArray(value) && value.every(isSupportPoint);
 }
 
-/** Único caminho de leitura de Início, Mapa e Detalhe: somente aprovados. */
-export async function getPublicPoints(): Promise<SupportPoint[]> {
-  const points = await getAllPoints();
-  return points.filter((point) => point.status === 'aprovado');
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item): item is string => typeof item === 'string');
 }
 
-/** Busca um ponto pelo id, em qualquer status. */
-export async function getPointById(id: string): Promise<SupportPoint | null> {
-  const points = await getAllPoints();
-  return points.find((point) => point.id === id) ?? null;
-}
+// ---------------------------------------------------------------------------
+// Operações públicas
+// ---------------------------------------------------------------------------
 
 /**
- * Busca para o detalhe público: só devolve os dados quando o ponto está aprovado.
- * Nos demais casos informa apenas o motivo (para a tela mostrar um texto próprio).
+ * Semeia os 7 pontos iniciais caso a chave ainda não exista, ou caso uma gravação
+ * antiga tenha deixado a lista vazia (respeitando seeds que o Admin tenha excluído).
  */
-export async function getPublicPointById(id: string): Promise<PublicPointLookup> {
-  const point = await getPointById(id);
-  if (!point) {
-    return { kind: 'not_found' };
+export async function ensureSeededPoints(): Promise<SupportPoint[]> {
+  const deletedSeeds = await readStoredJson<string[]>(DELETED_SEEDS_KEY, isStringArray, []);
+  const activeSeeds = SEED_POINTS.filter((seed) => !deletedSeeds.includes(seed.id));
+
+  const exists = await hasStoredKey(POINTS_KEY);
+  if (!exists) {
+    await writeStoredJson(POINTS_KEY, activeSeeds);
+    return [...activeSeeds];
   }
-  if (point.status !== 'aprovado') {
-    return { kind: 'unavailable', status: point.status };
+  const current = await readStoredJson<SupportPoint[]>(POINTS_KEY, isSupportPointList, []);
+  if (current.length === 0 && activeSeeds.length > 0) {
+    await writeStoredJson(POINTS_KEY, activeSeeds);
+    return [...activeSeeds];
   }
-  return { kind: 'ok', point };
+  return current;
 }
 
-/** Pontos cadastrados por um perfil (qualquer status). */
-export async function getPointsByOwner(ownerId: string): Promise<SupportPoint[]> {
-  const points = await getAllPoints();
-  return points.filter((point) => point.ownerId === ownerId);
+/** Devolve todos os pontos (aprovados, pendentes e rejeitados). */
+export async function getAllPoints(): Promise<SupportPoint[]> {
+  return ensureSeededPoints();
 }
 
-/** Pontos aguardando avaliação. */
-export async function getPendingPoints(): Promise<SupportPoint[]> {
-  const points = await getAllPoints();
-  return points.filter((point) => point.status === 'em_analise');
-}
-
-/** Cria um ponto novo, sempre em análise. */
-export async function createPoint(
+/** Cria um novo pedido de ponto de apoio (entra sempre como "pending"). */
+export async function createPointRequest(
   input: NewSupportPointInput,
-  owner: CitizenProfile,
+  author: CitizenProfile,
 ): Promise<SupportPoint> {
-  const validation = validatePointInput(input);
-  if (!validation.valid || input.latitude === null || input.longitude === null) {
-    throw new Error('Confira os dados do ponto antes de enviar.');
-  }
-  const now = new Date().toISOString();
-  const point: SupportPoint = {
-    id: generateId('pt'),
+  const current = await getAllPoints();
+  const resolvedAddress =
+    input.structuredAddress && input.structuredAddress.street.trim().length > 0
+      ? formatStructuredAddress(input.structuredAddress)
+      : input.address.trim();
+
+  const newPoint: SupportPoint = {
+    id: generateId('point'),
     type: input.type,
     name: input.name.trim(),
     description: input.description.trim(),
-    latitude: input.latitude,
-    longitude: input.longitude,
-    is24h: input.is24h,
+    address: resolvedAddress,
+    structuredAddress: input.structuredAddress,
+    latitude: input.latitude ?? 0,
+    longitude: input.longitude ?? 0,
     opensAt: input.is24h ? '00:00' : input.opensAt,
     closesAt: input.is24h ? '23:59' : input.closesAt,
-    hasShade: input.hasShade,
-    hasColdWater: input.hasColdWater,
-    hasSeating: input.hasSeating,
+    is24h: input.is24h,
+    amenities: input.amenities,
     photoUri: input.photoUri,
-    status: 'em_analise',
-    ownerId: owner.id,
-    ownerName: owner.name,
-    createdAt: now,
-    updatedAt: now,
+    status: 'pending',
+    active: true,
+    createdBy: author.id,
+    createdByName: author.name,
+    createdByContact: author.contact,
+    createdAt: new Date().toISOString(),
   };
-  const points = await getAllPoints();
-  await writeStoredJson(POINTS_KEY, [...points, point]);
-  return point;
+
+  const next = [newPoint, ...current];
+  await writeStoredJson(POINTS_KEY, next);
+  return newPoint;
 }
 
-/** Atualização de baixo nível do status (atualiza updatedAt). */
+/** Edita os dados cadastrais de um ponto existente (Admin - M7). */
+export async function updatePoint(
+  id: string,
+  input: NewSupportPointInput,
+  editorName: string,
+): Promise<SupportPoint[]> {
+  const current = await getAllPoints();
+  const resolvedAddress =
+    input.structuredAddress && input.structuredAddress.street.trim().length > 0
+      ? formatStructuredAddress(input.structuredAddress)
+      : input.address.trim();
+
+  const next = current.map((point): SupportPoint => {
+    if (point.id !== id) {
+      return point;
+    }
+    const structuredAddress: PointAddress | undefined = input.structuredAddress
+      ? {
+          cep: input.structuredAddress.cep?.trim(),
+          street: input.structuredAddress.street.trim(),
+          number: input.structuredAddress.number?.trim(),
+          complement: input.structuredAddress.complement?.trim(),
+          neighborhood: input.structuredAddress.neighborhood?.trim(),
+          city: input.structuredAddress.city?.trim(),
+          state: input.structuredAddress.state?.trim().toUpperCase(),
+        }
+      : point.structuredAddress;
+
+    return {
+      ...point,
+      type: input.type,
+      name: input.name.trim(),
+      description: input.description.trim(),
+      address: resolvedAddress,
+      structuredAddress,
+      latitude: input.latitude ?? point.latitude,
+      longitude: input.longitude ?? point.longitude,
+      opensAt: input.is24h ? '00:00' : input.opensAt,
+      closesAt: input.is24h ? '23:59' : input.closesAt,
+      is24h: input.is24h,
+      amenities: input.amenities,
+      photoUri: input.photoUri,
+      updatedBy: editorName,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  await writeStoredJson(POINTS_KEY, next);
+  return next;
+}
+
+/** Atualiza o status (aprovar ou rejeitar) com trilha de auditoria (M7). */
 export async function updatePointStatus(
   id: string,
-  status: SupportPointStatus,
+  status: PointStatus,
+  reviewerName?: string,
   rejectionReason?: string,
-): Promise<SupportPoint> {
-  const points = await getAllPoints();
-  const target = points.find((point) => point.id === id);
-  if (!target) {
-    throw new Error('Ponto não encontrado.');
-  }
-  const updated: SupportPoint = {
-    ...target,
-    status,
-    rejectionReason: status === 'rejeitado' ? rejectionReason : undefined,
-    updatedAt: new Date().toISOString(),
-  };
-  await writeStoredJson(
-    POINTS_KEY,
-    points.map((point) => (point.id === id ? updated : point)),
+): Promise<SupportPoint[]> {
+  const current = await getAllPoints();
+  const nowIso = new Date().toISOString();
+  const next = current.map((point) =>
+    point.id === id
+      ? {
+          ...point,
+          status,
+          active: status === 'approved' ? true : point.active,
+          reviewedBy: reviewerName ?? point.reviewedBy,
+          reviewedAt: nowIso,
+          rejectionReason:
+            status === 'rejected'
+              ? rejectionReason?.trim() || 'Rejeitado pela moderação.'
+              : undefined,
+        }
+      : point,
   );
-  return updated;
+  await writeStoredJson(POINTS_KEY, next);
+  return next;
 }
 
-/**
- * Regra do dono: só quem cadastrou alterna entre aprovado e desativado.
- * Pontos em análise ou rejeitados não alternam.
- */
-export async function changeStatusAsOwner(
+/** Liga ou desliga um ponto (usado pelo dono do espaço ou pelo administrador). */
+export async function togglePointActive(
   id: string,
-  ownerId: string,
-  status: SupportPointStatus,
-): Promise<SupportPoint> {
-  const point = await getPointById(id);
-  if (!point) {
-    throw new Error('Ponto não encontrado.');
-  }
-  if (point.ownerId !== ownerId) {
-    throw new Error('Só quem cadastrou o espaço pode alterá-lo.');
-  }
-  const isDeactivating = point.status === 'aprovado' && status === 'desativado';
-  const isReactivating = point.status === 'desativado' && status === 'aprovado';
-  if (!isDeactivating && !isReactivating) {
-    throw new Error('Este espaço não pode ser alterado no status atual.');
-  }
-  return updatePointStatus(id, status);
+  active: boolean,
+  actorName?: string,
+): Promise<SupportPoint[]> {
+  const current = await getAllPoints();
+  const next = current.map((point) =>
+    point.id === id
+      ? {
+          ...point,
+          active,
+          updatedBy: actorName ?? point.updatedBy,
+          updatedAt: new Date().toISOString(),
+        }
+      : point,
+  );
+  await writeStoredJson(POINTS_KEY, next);
+  return next;
 }
 
-/** Regra do avaliador: aprova ou rejeita pontos em análise (exige modo avaliador). */
-export async function reviewPoint(
-  id: string,
-  status: SupportPointStatus,
-  rejectionReason?: string,
-): Promise<SupportPoint> {
-  const reviewerMode = await getReviewerMode();
-  if (!reviewerMode) {
-    throw new Error('Ative o modo avaliador para avaliar envios.');
+/** Remove definitivamente um ponto de apoio do armazenamento (M7 - Opção 6A). */
+export async function deletePoint(id: string): Promise<SupportPoint[]> {
+  if (id.startsWith('seed_')) {
+    const deletedSeeds = await readStoredJson<string[]>(DELETED_SEEDS_KEY, isStringArray, []);
+    if (!deletedSeeds.includes(id)) {
+      await writeStoredJson(DELETED_SEEDS_KEY, [...deletedSeeds, id]);
+    }
   }
-  const point = await getPointById(id);
-  if (!point) {
-    throw new Error('Ponto não encontrado.');
-  }
-  if (point.status !== 'em_analise' || (status !== 'aprovado' && status !== 'rejeitado')) {
-    throw new Error('Este envio já foi avaliado.');
-  }
-  if (status === 'rejeitado' && (!rejectionReason || rejectionReason.trim().length === 0)) {
-    throw new Error('Informe o motivo da rejeição.');
-  }
-  return updatePointStatus(id, status, rejectionReason?.trim());
+  const current = await getAllPoints();
+  const next = current.filter((point) => point.id !== id);
+  await writeStoredJson(POINTS_KEY, next);
+  return next;
 }

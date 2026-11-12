@@ -1,276 +1,396 @@
 /**
- * Aba Colaborar.
- * Mostra o cartão do perfil local, as ações de colaboração ("Cadastrar um ponto",
- * "Reportar bebedouro com defeito" e "Meus espaços") e, no rodapé, o interruptor
- * do "Modo avaliador (demonstração)" com acesso à ReviewerScreen.
- * Consultar clima, mapa e detalhes nunca pede identificação; cadastrar ou reportar
- * abre o ProfileModal na primeira vez.
+ * Tela "Colaborar" (M1, M4, M6):
+ * Visível para usuários autenticados (cidadãos e administradores).
+ * Permite:
+ * 1) Abrir o formulário para pedir o cadastro de um ponto de apoio novo;
+ * 2) Informar que um bebedouro cadastrado está com defeito (com foto opcional);
+ * 3) Acessar a tela "Meus pontos cadastrados".
+ * Zero emojis e sem ProfileModal (usa a sessão autenticada do AuthContext).
  */
-import { useNavigation } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import {
+  useNavigation,
+  type CompositeNavigationProp,
+} from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AppIcon } from '../components/AppIcon';
+import { CameraCapture } from '../components/CameraCapture';
 import { CustomButton } from '../components/CustomButton';
-import { Loading } from '../components/Loading';
-import { ProfileModal } from '../components/ProfileModal';
+import { EmptyState } from '../components/EmptyState';
+import { FormField } from '../components/FormField';
+import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
 import { useSupportPoints } from '../hooks/useSupportPoints';
 import { colors } from '../theme/colors';
 import { cardShadow, fontSize, radius, spacing } from '../theme/spacing';
-import type { CollaborateNavigation, PointFormMode } from '../types/navigation';
-import type { ProfileInput } from '../types/profile';
+import type { RootStackParamList, RootTabParamList } from '../types/navigation';
+import type { SupportPoint } from '../types/supportPoint';
+import { validateReportInput } from '../utils/validation';
+
+type CollaborateNavigation = CompositeNavigationProp<
+  BottomTabNavigationProp<RootTabParamList, 'Collaborate'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 export function CollaborateScreen() {
   const navigation = useNavigation<CollaborateNavigation>();
-  const {
-    profile,
-    loading: profileLoading,
-    saveProfile,
-    clearProfile,
-    reviewerMode,
-    setReviewerMode,
-  } = useProfile();
-  const { myPoints, pendingPoints, openReports } = useSupportPoints();
+  const { session } = useAuth();
+  const { profile } = useProfile();
+  const { points, reportDefect } = useSupportPoints();
 
-  const [modalVisible, setModalVisible] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PointFormMode | null>(null);
+  const [reportFormOpen, setReportFormOpen] = useState(false);
+  const [selectedPointId, setSelectedPointId] = useState('');
+  const [description, setDescription] = useState('');
+  const [photoUri, setPhotoUri] = useState<string | undefined>(undefined);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleOpenProfileModal = useCallback((): void => {
-    setPendingAction(null);
-    setModalVisible(true);
-  }, []);
-
-  const handleStartAction = useCallback(
-    (mode: PointFormMode): void => {
-      if (!profile) {
-        setPendingAction(mode);
-        setModalVisible(true);
-        return;
-      }
-      navigation.navigate('PointForm', { mode });
-    },
-    [navigation, profile],
+  // Bebedouros aprovados e ativos (ou pontos que oferecem água potável)
+  const drinkingPoints = useMemo<SupportPoint[]>(
+    () =>
+      points.filter(
+        (point) =>
+          point.status === 'approved' &&
+          point.active &&
+          (point.type === 'bebedouro' ||
+            point.amenities.includes('agua_potavel')),
+      ),
+    [points],
   );
 
-  const handleSaveProfile = useCallback(
-    async (input: ProfileInput) => {
-      const saved = await saveProfile(input);
-      if (pendingAction) {
-        const nextMode = pendingAction;
-        setPendingAction(null);
-        navigation.navigate('PointForm', { mode: nextMode });
-      }
-      return saved;
-    },
-    [navigation, pendingAction, saveProfile],
+  const selectedPoint = useMemo<SupportPoint | undefined>(
+    () => drinkingPoints.find((point) => point.id === selectedPointId),
+    [drinkingPoints, selectedPointId],
   );
 
-  const handleClearProfile = useCallback((): void => {
-    Alert.alert(
-      'Sair deste perfil',
-      'Sua identificação será removida deste aparelho. Os pontos já enviados permanecem salvos.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sair',
-          style: 'destructive',
-          onPress: () => {
-            clearProfile().catch(() => {
-              Alert.alert('Atenção', 'Não foi possível remover o perfil agora.');
-            });
-          },
-        },
-      ],
-    );
-  }, [clearProfile]);
-
-  const handleToggleReviewerMode = useCallback(
-    (value: boolean): void => {
-      setReviewerMode(value).catch(() => {
-        Alert.alert('Atenção', 'Não foi possível alterar o modo avaliador.');
+  const handleNewPointPress = useCallback((): void => {
+    if (!session || !profile) {
+      navigation.navigate('Login', {
+        redirectTo: { target: 'PointForm' },
+        reasonMessage:
+          'Entre na sua conta para sugerir o cadastro de um ponto de apoio.',
       });
-    },
-    [setReviewerMode],
-  );
+      return;
+    }
+    navigation.navigate('PointForm');
+  }, [session, profile, navigation]);
 
-  const handleOpenMyPlaces = useCallback((): void => {
-    navigation.navigate('MyPlaces');
-  }, [navigation]);
+  const handleToggleReportForm = useCallback((): void => {
+    if (!session || !profile) {
+      navigation.navigate('Login', {
+        redirectTo: { target: 'Collaborate' },
+        reasonMessage:
+          'Entre na sua conta para relatar um bebedouro com defeito.',
+      });
+      return;
+    }
+    setReportFormOpen((prev) => !prev);
+    setErrors({});
+  }, [session, profile, navigation]);
 
-  const handleOpenReviewer = useCallback((): void => {
-    navigation.navigate('Reviewer');
-  }, [navigation]);
+  const handleSubmitReport = useCallback(async (): Promise<void> => {
+    if (!profile) {
+      navigation.navigate('Login', {
+        redirectTo: { target: 'Collaborate' },
+      });
+      return;
+    }
+    const input = {
+      pointId: selectedPointId,
+      pointName: selectedPoint?.name ?? '',
+      description,
+      photoUri,
+    };
+    const validation = validateReportInput(input);
+    if (!validation.valid) {
+      setErrors(validation.errors);
+      const firstMessage =
+        Object.values(validation.errors)[0] ?? 'Confira os campos informados.';
+      Alert.alert('Atenção', firstMessage);
+      return;
+    }
 
-  if (profileLoading) {
+    setSubmitting(true);
+    try {
+      await reportDefect(input, profile);
+      setSelectedPointId('');
+      setDescription('');
+      setPhotoUri(undefined);
+      setErrors({});
+      setReportFormOpen(false);
+      Alert.alert(
+        'Relato enviado',
+        'Obrigado por avisar! O aviso já aparece nos detalhes do ponto e na fila da administração.',
+      );
+    } catch {
+      Alert.alert(
+        'Atenção',
+        'Não foi possível enviar o relato agora. Tente de novo.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    profile,
+    navigation,
+    selectedPointId,
+    selectedPoint,
+    description,
+    photoUri,
+    reportDefect,
+  ]);
+
+  if (!session) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <Loading message="Carregando seu perfil..." />
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <View style={styles.unauthContainer}>
+          <EmptyState
+            icon="user"
+            title="Entre para colaborar"
+            message="Faça login ou crie uma conta gratuita para sugerir pontos de hidratação e descanso ou relatar problemas em bebedouros."
+            actionLabel="Entrar na minha conta"
+            onAction={() =>
+              navigation.navigate('Login', {
+                redirectTo: { target: 'Collaborate' },
+              })
+            }
+          />
+        </View>
       </SafeAreaView>
     );
   }
 
-  const totalToReview = pendingPoints.length + openReports.length;
-
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.heading}>Colaborar com a rede</Text>
-        <Text style={styles.subheading}>
-          Ajude outros trabalhadores indicando bebedouros, sombras e pontos de descanso, ou
-          avisando quando um bebedouro estiver sem água.
-        </Text>
-
-        {/* Cartão do perfil */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Sua identificação</Text>
-          {profile ? (
-            <>
-              <Text style={styles.profileName}>👤 {profile.name}</Text>
-              {profile.contact ? (
-                <Text style={styles.profileContact}>📞 {profile.contact}</Text>
-              ) : (
-                <Text style={styles.profileContact}>Sem contato informado</Text>
-              )}
-              <View style={styles.profileButtons}>
-                <CustomButton
-                  title="Editar"
-                  variant="outline"
-                  compact
-                  onPress={handleOpenProfileModal}
-                  style={styles.halfButton}
-                />
-                <CustomButton
-                  title="Sair deste perfil"
-                  variant="danger"
-                  compact
-                  onPress={handleClearProfile}
-                  style={styles.halfButton}
-                />
-              </View>
-            </>
-          ) : (
-            <>
-              <Text style={styles.cardDescription}>
-                Você não precisa de conta para ver o clima e o mapa. Só pedimos seu nome na hora
-                de enviar um ponto ou relato.
-              </Text>
-              <CustomButton
-                title="Informar meu nome"
-                variant="outline"
-                compact
-                onPress={handleOpenProfileModal}
-              />
-            </>
-          )}
-        </View>
-
-        {/* Ações de colaboração */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Ações</Text>
-          <Text style={styles.cardDescription}>
-            Todo novo ponto passa pela avaliação antes de aparecer no mapa público.
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.select({ ios: 'padding', android: undefined })}
+      >
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.title}>Colaborar com a Rede</Text>
+          <Text style={styles.subtitle}>
+            Ajude outros entregadores e trabalhadores de rua indicando pontos de
+            água, sombra e descanso ou avisando quando um bebedouro quebrar.
           </Text>
-          <CustomButton
-            title="➕ Cadastrar um ponto"
-            onPress={() => handleStartAction('novo_ponto')}
-          />
-          <CustomButton
-            title="🔧 Reportar bebedouro com defeito"
-            variant="secondary"
-            onPress={() => handleStartAction('bebedouro_avariado')}
-          />
-          <CustomButton
-            title={`📋 Meus espaços (${myPoints.length})`}
-            variant="outline"
-            onPress={handleOpenMyPlaces}
-          />
-        </View>
 
-        {/* Rodapé: Modo avaliador (demonstração) */}
-        <View style={styles.reviewerCard}>
-          <View style={styles.switchRow}>
-            <View style={styles.switchTextBox}>
-              <Text style={styles.cardTitle}>Modo avaliador (demonstração)</Text>
-              <Text style={styles.cardDescription}>
-                Simula no próprio aparelho a moderação que, em produção, ficaria no painel do
-                administrador em um backend.
+          <View style={styles.profileCard}>
+            <View style={styles.profileInfo}>
+              <Text style={styles.profileLabel}>Conectado como</Text>
+              <Text style={styles.profileName}>{session.name}</Text>
+              <Text style={styles.profileContact}>
+                {session.email} · CEP {session.cep}
               </Text>
             </View>
-            <Switch
-              value={reviewerMode}
-              onValueChange={handleToggleReviewerMode}
-              trackColor={{ false: colors.border, true: colors.primaryLight }}
-              thumbColor={reviewerMode ? colors.primary : colors.disabled}
+            <CustomButton
+              title="Meus pontos"
+              icon="map-pin"
+              variant="outline"
+              compact
+              onPress={() => navigation.navigate('MyPlaces')}
             />
           </View>
 
-          {reviewerMode ? (
+          <View style={styles.actionCard}>
+            <View style={styles.actionHeader}>
+              <View style={styles.actionIconBox}>
+                <AppIcon name="plus-circle" size={20} color={colors.primary} />
+              </View>
+              <Text style={styles.actionTitle}>
+                Pedir cadastro de ponto de apoio
+              </Text>
+            </View>
+            <Text style={styles.actionText}>
+              Conhece um bebedouro público, praça sombreada, área de descanso ou
+              comércio parceiro? Envie pelo GPS ou pelo CEP para aprovação.
+            </Text>
             <CustomButton
-              title={`🛡️ Avaliar envios (${totalToReview} pendente${totalToReview === 1 ? '' : 's'})`}
-              onPress={handleOpenReviewer}
+              title="Novo ponto de apoio"
+              icon="plus-circle"
+              onPress={handleNewPointPress}
             />
-          ) : null}
-        </View>
-      </ScrollView>
+          </View>
 
-      <ProfileModal
-        visible={modalVisible}
-        initialProfile={profile}
-        onClose={() => {
-          setPendingAction(null);
-          setModalVisible(false);
-        }}
-        onSave={handleSaveProfile}
-      />
+          <View style={styles.actionCard}>
+            <View style={styles.actionHeader}>
+              <View
+                style={[
+                  styles.actionIconBox,
+                  { backgroundColor: colors.warningLight },
+                ]}
+              >
+                <AppIcon name="tool" size={20} color={colors.warning} />
+              </View>
+              <Text style={styles.actionTitle}>
+                Informar bebedouro com defeito
+              </Text>
+            </View>
+            <Text style={styles.actionText}>
+              Água desligada, torneira quebrada ou local fechado no horário em
+              que deveria estar aberto.
+            </Text>
+            <CustomButton
+              title={
+                reportFormOpen ? 'Fechar formulário' : 'Relatar defeito'
+              }
+              icon={reportFormOpen ? 'x' : 'alert-triangle'}
+              variant={reportFormOpen ? 'outline' : 'secondary'}
+              onPress={handleToggleReportForm}
+            />
+
+            {reportFormOpen ? (
+              <View style={styles.reportForm}>
+                <Text style={styles.fieldLabel}>
+                  Qual ponto está com problema? *
+                </Text>
+                {drinkingPoints.length === 0 ? (
+                  <EmptyState
+                    icon="droplet"
+                    title="Nenhum bebedouro disponível"
+                    message="Não há bebedouros ativos cadastrados no momento."
+                  />
+                ) : (
+                  <View style={styles.pointsList}>
+                    {drinkingPoints.map((point) => {
+                      const active = point.id === selectedPointId;
+                      return (
+                        <Pressable
+                          key={point.id}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          onPress={() => setSelectedPointId(point.id)}
+                          style={[
+                            styles.pointOption,
+                            active && styles.pointOptionActive,
+                          ]}
+                        >
+                          <View style={styles.pointOptionTextCol}>
+                            <Text
+                              style={[
+                                styles.pointOptionName,
+                                active && styles.pointOptionNameActive,
+                              ]}
+                            >
+                              {point.name}
+                            </Text>
+                            <Text style={styles.pointOptionAddress}>
+                              {point.address}
+                            </Text>
+                          </View>
+                          {active ? (
+                            <AppIcon
+                              name="check-circle"
+                              size={18}
+                              color={colors.primary}
+                            />
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+                {errors.pointId ? (
+                  <Text style={styles.error}>{errors.pointId}</Text>
+                ) : null}
+
+                <FormField
+                  label="O que está acontecendo? *"
+                  placeholder="Ex.: Sem água nas duas torneiras desde hoje cedo."
+                  multiline
+                  value={description}
+                  onChangeText={setDescription}
+                  error={errors.description}
+                  maxLength={280}
+                />
+
+                <CameraCapture
+                  label="Foto do problema (opcional)"
+                  photoUri={photoUri}
+                  onChangePhoto={setPhotoUri}
+                />
+
+                <CustomButton
+                  title="Enviar relato"
+                  icon="check"
+                  onPress={handleSubmitReport}
+                  loading={submitting}
+                />
+              </View>
+            ) : null}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
+  },
+  unauthContainer: {
+    flex: 1,
+    padding: spacing.md,
+    justifyContent: 'center',
   },
   content: {
     padding: spacing.md,
     paddingBottom: spacing.xl,
     gap: spacing.md,
   },
-  heading: {
+  title: {
     fontSize: fontSize.heading,
     fontWeight: '800',
     color: colors.text,
   },
-  subheading: {
+  subtitle: {
     fontSize: fontSize.small,
     fontWeight: '400',
-    color: colors.textMuted,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginTop: -spacing.xs,
   },
-  card: {
+  profileCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     padding: spacing.md,
     gap: spacing.sm,
     ...cardShadow,
   },
-  reviewerCard: {
-    backgroundColor: colors.infoLight,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.info,
-    padding: spacing.md,
-    gap: spacing.sm,
+  profileInfo: {
+    flex: 1,
+    gap: 2,
   },
-  cardTitle: {
-    fontSize: fontSize.title,
+  profileLabel: {
+    fontSize: fontSize.caption,
     fontWeight: '700',
-    color: colors.text,
-  },
-  cardDescription: {
-    fontSize: fontSize.small,
-    fontWeight: '400',
-    color: colors.textMuted,
+    color: colors.primary,
+    textTransform: 'uppercase',
   },
   profileName: {
     fontSize: fontSize.body,
@@ -278,26 +398,93 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   profileContact: {
-    fontSize: fontSize.small,
-    fontWeight: '400',
+    fontSize: fontSize.caption,
     color: colors.textMuted,
   },
-  profileButtons: {
-    flexDirection: 'row',
+  actionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
     gap: spacing.sm,
-    marginTop: spacing.xxs,
+    ...cardShadow,
   },
-  halfButton: {
+  actionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  actionIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionTitle: {
     flex: 1,
+    fontSize: fontSize.title,
+    fontWeight: '700',
+    color: colors.text,
   },
-  switchRow: {
+  actionText: {
+    fontSize: fontSize.small,
+    color: colors.textSecondary,
+    lineHeight: 20,
+  },
+  reportForm: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.xs,
+  },
+  fieldLabel: {
+    fontSize: fontSize.small,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  pointsList: {
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  pointOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.background,
     gap: spacing.sm,
   },
-  switchTextBox: {
+  pointOptionActive: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+    backgroundColor: colors.primarySubtle,
+  },
+  pointOptionTextCol: {
     flex: 1,
-    gap: spacing.xxs,
+  },
+  pointOptionName: {
+    fontSize: fontSize.small,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  pointOptionNameActive: {
+    color: colors.primaryDark,
+  },
+  pointOptionAddress: {
+    fontSize: fontSize.caption,
+    color: colors.textMuted,
+  },
+  error: {
+    fontSize: fontSize.caption,
+    fontWeight: '500',
+    color: colors.danger,
+    marginBottom: spacing.xs,
   },
 });

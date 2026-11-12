@@ -1,12 +1,16 @@
 /**
- * Tela 1 · Início.
- * Mostra o alerta combinado, o índice de calor, a qualidade do ar, o resumo do clima,
- * a previsão (próximas 8 faixas + faixa mais amena + tendência), o ponto de apoio mais
- * próximo e o ranking de pontos mais quentes da cidade.
- * Usa uma única FlatList com ListHeaderComponent (sem ScrollView envolvendo lista).
+ * Tela de Clima Detalhado (Aba "Clima" - antiga HomeScreen, movida na M4):
+ * Mostra alerta com explicação M2 e dicas M3, modo "Trabalho na rua",
+ * resumo meteorológico, previsão das próximas 24h, qualidade do ar (PM2.5)
+ * e ranking dos 10 pontos mais quentes de São Paulo.
  */
-import { useNavigation } from '@react-navigation/native';
-import { useCallback, useMemo } from 'react';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import {
+  useNavigation,
+  type CompositeNavigationProp,
+} from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -25,98 +29,87 @@ import { ForecastStrip } from '../components/ForecastStrip';
 import { HotSpotItem } from '../components/HotSpotItem';
 import { Loading } from '../components/Loading';
 import { PermissionNotice } from '../components/PermissionNotice';
-import { PointListItem } from '../components/PointListItem';
 import { WeatherSummary } from '../components/WeatherSummary';
-import { DEFAULT_REGION, NEARBY_RADIUS_METERS } from '../config/appConfig';
 import { useLocation } from '../hooks/useLocation';
-import { useProfile } from '../hooks/useProfile';
 import { useSupportPoints } from '../hooks/useSupportPoints';
 import { useWeather } from '../hooks/useWeather';
-import { findMildestSlot, getAlertMessage } from '../services/heatIndexService';
-import { alertColors, alertTextColors, colors } from '../theme/colors';
+import { getAlertMessage } from '../services/heatIndexService';
+import { colors } from '../theme/colors';
 import { cardShadow, fontSize, radius, spacing } from '../theme/spacing';
-import type { HomeNavigation } from '../types/navigation';
-import type { SupportPoint } from '../types/supportPoint';
+import type { RootStackParamList, RootTabParamList } from '../types/navigation';
 import type { HotSpot } from '../types/weather';
-import { calculateDistanceMeters, formatDistance } from '../utils/distance';
-import {
-  airQualityLabels,
-  alertLevelLabels,
-  formatHeatIndex,
-  formatTime,
-  heatTrendIcons,
-  heatTrendLabels,
-} from '../utils/formatters';
+import { calculateDistanceMeters } from '../utils/distance';
+import { airQualityLabels, formatDateTime } from '../utils/formatters';
 
-interface NearestPoint {
-  point: SupportPoint;
-  distanceMeters: number;
-}
+type WeatherNavigation = CompositeNavigationProp<
+  BottomTabNavigationProp<RootTabParamList, 'Weather'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 export function HomeScreen() {
-  const navigation = useNavigation<HomeNavigation>();
-  const { profile, workerMode, setWorkerMode } = useProfile();
+  const navigation = useNavigation<WeatherNavigation>();
+  const [workerMode, setWorkerMode] = useState(true);
   const {
     coordinates,
     permission,
     requestPermission,
-    refresh: refreshLocation,
     openSettings,
-  } = useLocation();
-  const { bundle, hotSpots, hotSpotsError, loading, refreshing, error, reload } = useWeather(
-    coordinates,
-    workerMode,
-  );
-  const { points, openReportsByPoint, reload: reloadPoints } = useSupportPoints();
+  } = useLocation({ watch: false });
 
-  const referenceCoords = useMemo(
-    () =>
-      coordinates ?? {
-        latitude: DEFAULT_REGION.latitude,
-        longitude: DEFAULT_REGION.longitude,
-      },
-    [coordinates],
-  );
+  const {
+    bundle,
+    hotSpots,
+    hotSpotsError,
+    loading,
+    refreshing,
+    error,
+    reload,
+  } = useWeather(coordinates, workerMode);
 
-  /** Próximas 8 faixas (24 horas) da previsão. */
-  const nextEightSlots = useMemo(
-    () => (bundle ? bundle.forecast.slice(0, 8) : []),
-    [bundle],
-  );
+  const { points } = useSupportPoints();
 
-  /** Faixa de menor índice de calor nas próximas 24 horas. */
-  const mildestSlot = useMemo(
-    () => (bundle ? findMildestSlot(bundle.forecast, 24) : null),
-    [bundle],
-  );
-
-  /** Ponto público mais próximo da posição de referência. */
-  const nearestPoint = useMemo<NearestPoint | null>(() => {
-    return points.reduce<NearestPoint | null>((closest, point) => {
-      const distanceMeters = calculateDistanceMeters(referenceCoords, point);
-      if (closest === null || distanceMeters < closest.distanceMeters) {
-        return { point, distanceMeters };
+  const nearestPoint = useMemo(() => {
+    const approved = points.filter((p) => p.status === 'approved' && p.active);
+    if (approved.length === 0) {
+      return null;
+    }
+    const withDist = approved.map((point) => ({
+      point,
+      distanceMeters: coordinates
+        ? calculateDistanceMeters(coordinates, {
+            latitude: point.latitude,
+            longitude: point.longitude,
+          })
+        : null,
+    }));
+    withDist.sort((a, b) => {
+      if (a.distanceMeters !== null && b.distanceMeters !== null) {
+        return a.distanceMeters - b.distanceMeters;
       }
-      return closest;
-    }, null);
-  }, [points, referenceCoords]);
+      return a.point.name.localeCompare(b.point.name);
+    });
+    return withDist[0] ?? null;
+  }, [points, coordinates]);
 
-  const handleRefresh = useCallback(async (): Promise<void> => {
-    await Promise.all([refreshLocation(), reload(), reloadPoints()]);
-  }, [refreshLocation, reload, reloadPoints]);
+  const updatedLabel = useMemo<string>(() => {
+    if (!bundle) {
+      return '';
+    }
+    const base = `Atualizado em ${formatDateTime(bundle.fetchedAt)}`;
+    if (bundle.current.source === 'mock') {
+      return `${base} · modo demonstração`;
+    }
+    if (bundle.isStale) {
+      return `${base} · sem conexão (dados salvos)`;
+    }
+    return base;
+  }, [bundle]);
 
-  const handleOpenPoint = useCallback(
-    (point: SupportPoint): void => {
-      navigation.navigate('PointDetail', { pointId: point.id });
+  const handleOpenNearestPoint = useCallback(
+    (pointId: string): void => {
+      navigation.navigate('PointDetail', { pointId });
     },
     [navigation],
-  );
-
-  const handleToggleWorkerMode = useCallback(
-    (value: boolean): void => {
-      setWorkerMode(value);
-    },
-    [setWorkerMode],
   );
 
   const renderHotSpot = useCallback(
@@ -126,74 +119,40 @@ export function HomeScreen() {
     [],
   );
 
-  const keyExtractor = useCallback((item: HotSpot) => item.id, []);
+  const keyExtractor = useCallback((item: HotSpot): string => item.id, []);
 
-  // Estado 1: Carregando inicial.
   if (loading && !bundle) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <Loading message="Calculando o índice de calor da sua região..." />
-      </SafeAreaView>
-    );
+    return <Loading message="Consultando clima da sua região..." />;
   }
 
-  // Estado 2: Erro sem dados disponíveis.
   if (error && !bundle) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <ErrorState message={error} onRetry={handleRefresh} />
-      </SafeAreaView>
-    );
+    return <ErrorState message={error} onRetry={reload} />;
   }
 
-  // Estado 3: Vazio (sem leitura disponível).
   if (!bundle) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <EmptyState
-          title="Sem leitura de clima"
-          message="Não encontramos dados para esta região."
-          actionLabel="Atualizar"
-          onAction={handleRefresh}
-        />
-      </SafeAreaView>
+      <EmptyState
+        title="Sem dados de clima"
+        message="Toque abaixo para tentar carregar novamente."
+        actionLabel="Recarregar"
+        onAction={reload}
+      />
     );
   }
 
-  const greeting = profile ? `Olá, ${profile.name}` : 'Olá, trabalhador(a)';
-  const updatedTime = formatTime(bundle.current.readAt);
-  const updatedLabel =
-    bundle.current.source === 'mock'
-      ? `Modo demonstração · leitura às ${updatedTime}`
-      : `Leitura às ${updatedTime}`;
-  const airLevelColor = alertColors[bundle.alert.airLevel];
-  const airLevelTextColor = alertTextColors[bundle.alert.airLevel];
-
-  const headerElement = (
+  const header = (
     <View style={styles.headerContent}>
-      <View style={styles.greetingBox}>
-        <Text style={styles.greeting}>{greeting}</Text>
-        <Text style={styles.locationText}>
-          📍 {bundle.current.name} · {updatedTime}
-        </Text>
-      </View>
+      <Text style={styles.screenTitle}>Clima e Qualidade do Ar</Text>
+      <Text style={styles.region}>{bundle.current.name}</Text>
 
       {permission !== 'granted' ? (
         <PermissionNotice
-          title="Usando a região padrão"
-          description="Permita o acesso à localização para ver o índice de calor e os pontos de apoio perto de você."
+          title="Usando o centro de São Paulo"
+          description="Permita o acesso à localização para ver o alerta exato de onde você está."
           permission={permission}
           onRequestPermission={requestPermission}
           onOpenSettings={openSettings}
         />
-      ) : null}
-
-      {bundle.isStale ? (
-        <View style={styles.staleBanner} accessibilityRole="alert">
-          <Text style={styles.staleText}>
-            ⚠️ Sem conexão: mostrando dados salvos de {updatedTime}.
-          </Text>
-        </View>
       ) : null}
 
       <AlertCard
@@ -201,112 +160,78 @@ export function HomeScreen() {
         heatIndexC={bundle.alert.heatIndexC}
         message={getAlertMessage(bundle.alert.combinedLevel)}
         updatedLabel={updatedLabel}
+        nearestPoint={nearestPoint}
+        onOpenNearestPoint={handleOpenNearestPoint}
       />
 
       <View style={styles.workerRow}>
-        <View style={styles.workerTextBox}>
-          <Text style={styles.workerTitle}>Perfil trabalhador na rua</Text>
+        <View style={styles.workerText}>
+          <Text style={styles.workerTitle}>Trabalho na rua</Text>
           <Text style={styles.workerSubtitle}>
-            Antecipa os alertas em 2 °C para quem trabalha exposto ao sol
+            Antecipa os alertas em 2 °C para quem pedala, pilota ou caminha sob o sol
           </Text>
         </View>
         <Switch
+          accessibilityLabel="Alternar modo trabalho na rua"
           value={workerMode}
-          onValueChange={handleToggleWorkerMode}
-          trackColor={{ false: colors.border, true: colors.primaryLight }}
-          thumbColor={workerMode ? colors.primary : colors.disabled}
+          onValueChange={setWorkerMode}
+          trackColor={{ false: colors.borderStrong, true: colors.primaryLight }}
+          thumbColor={workerMode ? colors.primary : colors.surface}
         />
-      </View>
-
-      <View style={styles.airCard}>
-        <View style={styles.airInfo}>
-          <Text style={styles.sectionSmallTitle}>Qualidade do ar</Text>
-          <Text style={styles.airSubtitle}>
-            Índice {bundle.airQuality.index}/5 ({airQualityLabels[bundle.airQuality.index]}) · PM2.5{' '}
-            {bundle.airQuality.pm25.toFixed(1).replace('.', ',')} µg/m³
-          </Text>
-        </View>
-        <View style={[styles.airBadge, { backgroundColor: airLevelColor }]}>
-          <Text style={[styles.airBadgeText, { color: airLevelTextColor }]}>
-            {alertLevelLabels[bundle.alert.airLevel]}
-          </Text>
-        </View>
       </View>
 
       <WeatherSummary reading={bundle.current} />
 
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Próximas 24 horas</Text>
-          <Text style={styles.trendBadge}>
-            {heatTrendIcons[bundle.trend]} {heatTrendLabels[bundle.trend]}
+        <Text style={styles.sectionTitle}>Próximas 24 horas (de 3 em 3h)</Text>
+        <ForecastStrip slots={bundle.forecast} />
+      </View>
+
+      {bundle.airQuality ? (
+        <View style={styles.airCard}>
+          <Text style={styles.sectionTitle}>Qualidade do ar</Text>
+          <Text style={styles.airText}>
+            {airQualityLabels[bundle.airQuality.index]} · PM2.5:{' '}
+            {bundle.airQuality.pm25.toFixed(1)} µg/m³
           </Text>
         </View>
-        <ForecastStrip slots={nextEightSlots} />
-        {mildestSlot ? (
-          <Text style={styles.mildestText}>
-            🌤️ Horário mais ameno: {formatTime(mildestSlot.at)} (índice{' '}
-            {formatHeatIndex(mildestSlot.heatIndexC)})
-          </Text>
-        ) : null}
-      </View>
+      ) : null}
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Ponto de apoio mais próximo</Text>
-        {nearestPoint ? (
-          <>
-            <PointListItem
-              point={nearestPoint.point}
-              distanceMeters={nearestPoint.distanceMeters}
-              reportCount={openReportsByPoint[nearestPoint.point.id] ?? 0}
-              onPress={handleOpenPoint}
-            />
-            {nearestPoint.distanceMeters > NEARBY_RADIUS_METERS ? (
-              <Text style={styles.farHint}>
-                Nenhum ponto em um raio de {formatDistance(NEARBY_RADIUS_METERS)}. Mostrando o mais
-                próximo disponível.
-              </Text>
-            ) : null}
-          </>
-        ) : (
-          <Text style={styles.farHint}>Nenhum ponto de apoio público cadastrado ainda.</Text>
-        )}
-      </View>
-
-      <Text style={styles.sectionTitle}>Pontos mais quentes da cidade</Text>
-      {hotSpotsError ? <Text style={styles.farHint}>{hotSpotsError}</Text> : null}
+      <Text style={styles.sectionTitle}>Pontos mais quentes de São Paulo</Text>
+      {hotSpotsError ? (
+        <Text style={styles.hotSpotsWarning}>{hotSpotsError}</Text>
+      ) : null}
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <FlatList
         data={hotSpots}
         keyExtractor={keyExtractor}
         renderItem={renderHotSpot}
-        ListHeaderComponent={headerElement}
+        ListHeaderComponent={header}
         ListEmptyComponent={
           <EmptyState
-            title="Sem ranking no momento"
-            message="Puxe para atualizar os pontos monitorados da cidade."
+            title="Ranking indisponível"
+            message="Puxe a tela para baixo para tentar carregar os pontos monitorados."
           />
         }
-        contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={handleRefresh}
+            onRefresh={reload}
             colors={[colors.primary]}
-            tintColor={colors.primary}
           />
         }
+        contentContainerStyle={styles.listContent}
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
     backgroundColor: colors.background,
   },
@@ -318,30 +243,18 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginBottom: spacing.xs,
   },
-  greetingBox: {
-    gap: spacing.xxs,
+  screenTitle: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  greeting: {
+  region: {
     fontSize: fontSize.heading,
     fontWeight: '800',
     color: colors.text,
-  },
-  locationText: {
-    fontSize: fontSize.small,
-    fontWeight: '500',
-    color: colors.textMuted,
-  },
-  staleBanner: {
-    backgroundColor: colors.warningLight,
-    borderRadius: radius.md,
-    padding: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.secondary,
-  },
-  staleText: {
-    fontSize: fontSize.small,
-    fontWeight: '600',
-    color: colors.warning,
+    marginTop: -spacing.xs,
   },
   workerRow: {
     flexDirection: 'row',
@@ -349,15 +262,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
     gap: spacing.sm,
     ...cardShadow,
   },
-  workerTextBox: {
+  workerText: {
     flex: 1,
   },
   workerTitle: {
-    fontSize: fontSize.small,
+    fontSize: fontSize.body,
     fontWeight: '700',
     color: colors.text,
   },
@@ -366,69 +281,30 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: colors.textMuted,
   },
-  airCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-    ...cardShadow,
-  },
-  airInfo: {
-    flex: 1,
-    gap: spacing.xxs,
-  },
-  sectionSmallTitle: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  airSubtitle: {
-    fontSize: fontSize.caption,
-    fontWeight: '500',
-    color: colors.textMuted,
-  },
-  airBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-  },
-  airBadgeText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-  },
   section: {
     gap: spacing.xs,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   sectionTitle: {
     fontSize: fontSize.title,
     fontWeight: '700',
     color: colors.text,
   },
-  trendBadge: {
-    fontSize: fontSize.small,
-    fontWeight: '700',
-    color: colors.primaryDark,
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
-    borderRadius: radius.pill,
+  airCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.xxs,
+    ...cardShadow,
   },
-  mildestText: {
-    fontSize: fontSize.small,
-    fontWeight: '600',
-    color: colors.primaryDark,
+  airText: {
+    fontSize: fontSize.body,
+    fontWeight: '500',
+    color: colors.text,
   },
-  farHint: {
-    fontSize: fontSize.caption,
-    fontWeight: '400',
-    color: colors.textMuted,
+  hotSpotsWarning: {
+    fontSize: fontSize.small,
+    color: colors.warning,
   },
 });

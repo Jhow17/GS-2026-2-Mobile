@@ -1,73 +1,97 @@
 /**
- * Relatos de bebedouro avariado no AsyncStorage (@citizentech:v1:reports).
- * Toda escrita lê a lista, copia com spread e regrava a lista inteira.
+ * Persistência dos relatos de problema (ex.: bebedouro com defeito) no AsyncStorage.
+ * Inclui resolução com auditoria e exclusão individual ou em cascata por ponto (M7).
  */
 import type { CitizenProfile } from '../types/profile';
-import type { FountainReport, NewReportInput } from '../types/report';
+import type { DefectReport, NewReportInput, ReportStatus } from '../types/report';
 import { generateId } from '../utils/generateId';
-import { isArrayOf, isFountainReport, validateReportInput } from '../utils/validation';
+import { isRecord } from '../utils/validation';
 import { readStoredJson, STORAGE_PREFIX, writeStoredJson } from './cacheStorage';
 
 const REPORTS_KEY = `${STORAGE_PREFIX}reports`;
 
-function isReportList(value: unknown): value is FountainReport[] {
-  return isArrayOf(value, isFountainReport);
+function isReportStatus(value: unknown): value is ReportStatus {
+  return value === 'open' || value === 'resolved';
 }
 
-async function getAllReports(): Promise<FountainReport[]> {
-  return readStoredJson(REPORTS_KEY, isReportList, []);
+function isDefectReport(value: unknown): value is DefectReport {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.pointId === 'string' &&
+    typeof value.pointName === 'string' &&
+    typeof value.description === 'string' &&
+    isReportStatus(value.status) &&
+    typeof value.createdBy === 'string' &&
+    typeof value.createdByName === 'string' &&
+    typeof value.createdAt === 'string'
+  );
 }
 
-/** Cria um relato aberto. */
+function isDefectReportList(value: unknown): value is DefectReport[] {
+  return Array.isArray(value) && value.every(isDefectReport);
+}
+
+/** Lê todos os relatos salvos. */
+export async function getAllReports(): Promise<DefectReport[]> {
+  return readStoredJson<DefectReport[]>(REPORTS_KEY, isDefectReportList, []);
+}
+
+/** Cria um novo relato de problema com status "open". */
 export async function createReport(
   input: NewReportInput,
   author: CitizenProfile,
-): Promise<FountainReport> {
-  const validation = validateReportInput(input);
-  if (!validation.valid) {
-    throw new Error('Confira os dados do relato antes de enviar.');
-  }
-  const report: FountainReport = {
-    id: generateId('rep'),
+): Promise<DefectReport> {
+  const current = await getAllReports();
+  const report: DefectReport = {
+    id: generateId('report'),
     pointId: input.pointId,
+    pointName: input.pointName,
     description: input.description.trim(),
     photoUri: input.photoUri,
-    authorId: author.id,
-    authorName: author.name,
-    status: 'aberto',
+    status: 'open',
+    createdBy: author.id,
+    createdByName: author.name,
     createdAt: new Date().toISOString(),
   };
-  const reports = await getAllReports();
-  await writeStoredJson(REPORTS_KEY, [...reports, report]);
+
+  const next = [report, ...current];
+  await writeStoredJson(REPORTS_KEY, next);
   return report;
 }
 
-/** Relatos ainda abertos. */
-export async function getOpenReports(): Promise<FountainReport[]> {
-  const reports = await getAllReports();
-  return reports.filter((report) => report.status === 'aberto');
+/** Marca um relato como resolvido com metadados de auditoria (M7). */
+export async function resolveReport(
+  id: string,
+  resolverName?: string,
+): Promise<DefectReport[]> {
+  const current = await getAllReports();
+  const next = current.map((report) =>
+    report.id === id
+      ? {
+          ...report,
+          status: 'resolved' as const,
+          resolvedBy: resolverName ?? report.resolvedBy,
+          resolvedAt: new Date().toISOString(),
+        }
+      : report,
+  );
+  await writeStoredJson(REPORTS_KEY, next);
+  return next;
 }
 
-/** Quantidade de relatos abertos por id de ponto. */
-export async function countOpenReportsByPoint(): Promise<Record<string, number>> {
-  const open = await getOpenReports();
-  return open.reduce<Record<string, number>>(
-    (acc, report) => ({ ...acc, [report.pointId]: (acc[report.pointId] ?? 0) + 1 }),
-    {},
-  );
+/** Exclui definitivamente um relato de defeito (M7). */
+export async function deleteReport(id: string): Promise<DefectReport[]> {
+  const current = await getAllReports();
+  const next = current.filter((report) => report.id !== id);
+  await writeStoredJson(REPORTS_KEY, next);
+  return next;
 }
 
-/** Marca um relato como resolvido. */
-export async function resolveReport(id: string): Promise<FountainReport> {
-  const reports = await getAllReports();
-  const target = reports.find((report) => report.id === id);
-  if (!target) {
-    throw new Error('Relato não encontrado.');
-  }
-  const updated: FountainReport = { ...target, status: 'resolvido' };
-  await writeStoredJson(
-    REPORTS_KEY,
-    reports.map((report) => (report.id === id ? updated : report)),
-  );
-  return updated;
+/** Remove todos os relatos vinculados a um ponto excluído (M7 - Opção 6A). */
+export async function deleteReportsByPointId(pointId: string): Promise<DefectReport[]> {
+  const current = await getAllReports();
+  const next = current.filter((report) => report.pointId !== pointId);
+  await writeStoredJson(REPORTS_KEY, next);
+  return next;
 }
