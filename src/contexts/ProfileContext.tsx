@@ -1,8 +1,17 @@
 /**
- * Contexto do perfil local, do modo avaliador e do perfil "trabalhador na rua".
+ * Contexto do perfil do cidadão, sincronizado automaticamente com a sessão
+ * autenticada do AuthContext (retrocompatível com pontos já salvos - Opção 7A).
  */
-import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 
+import { useAuth } from '../hooks/useAuth';
 import * as profileStorage from '../services/profileStorage';
 import type { CitizenProfile, ProfileInput } from '../types/profile';
 
@@ -11,11 +20,6 @@ export interface ProfileContextValue {
   loading: boolean;
   saveProfile: (input: ProfileInput) => Promise<CitizenProfile>;
   clearProfile: () => Promise<void>;
-  reviewerMode: boolean;
-  setReviewerMode: (value: boolean) => Promise<void>;
-  /** Perfil "trabalhador na rua": desloca as faixas de alerta (só em memória). */
-  workerMode: boolean;
-  setWorkerMode: (value: boolean) => void;
 }
 
 export const ProfileContext = createContext<ProfileContextValue | null>(null);
@@ -25,68 +29,63 @@ interface ProfileProviderProps {
 }
 
 export function ProfileProvider({ children }: ProfileProviderProps) {
-  const [profile, setProfile] = useState<CitizenProfile | null>(null);
-  const [reviewerMode, setReviewerModeState] = useState(false);
-  const [workerMode, setWorkerMode] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const { session, loading: authLoading } = useAuth();
+  const [legacyProfile, setLegacyProfile] = useState<CitizenProfile | null>(null);
+  const [storageLoading, setStorageLoading] = useState(true);
 
-  // Carrega o perfil e o modo avaliador ao abrir o app.
   useEffect(() => {
     let active = true;
-
-    async function loadProfile(): Promise<void> {
-      try {
-        const [storedProfile, storedReviewerMode] = await Promise.all([
-          profileStorage.getProfile(),
-          profileStorage.getReviewerMode(),
-        ]);
+    profileStorage
+      .getProfile()
+      .then((stored) => {
         if (active) {
-          setProfile(storedProfile);
-          setReviewerModeState(storedReviewerMode);
+          setLegacyProfile(stored);
         }
-      } catch {
-        // Falha de leitura: seguimos sem perfil (o app funciona sem identificação).
-      } finally {
+      })
+      .finally(() => {
         if (active) {
-          setLoading(false);
+          setStorageLoading(false);
         }
-      }
-    }
-
-    loadProfile();
+      });
     return () => {
       active = false;
     };
   }, []);
 
-  const saveProfile = useCallback(async (input: ProfileInput): Promise<CitizenProfile> => {
-    const saved = await profileStorage.saveProfile(input);
-    setProfile(saved);
-    return saved;
-  }, []);
+  const activeProfile = useMemo<CitizenProfile | null>(() => {
+    if (session) {
+      return {
+        id: session.userId,
+        name: session.name,
+        contact: session.contact ?? session.email,
+        createdAt: session.loggedInAt,
+      };
+    }
+    return null;
+  }, [session]);
+
+  const saveProfile = useCallback(
+    async (input: ProfileInput): Promise<CitizenProfile> => {
+      const saved = await profileStorage.saveProfile(input);
+      setLegacyProfile(saved);
+      return saved;
+    },
+    [],
+  );
 
   const clearProfile = useCallback(async (): Promise<void> => {
     await profileStorage.clearProfile();
-    setProfile(null);
-  }, []);
-
-  const setReviewerMode = useCallback(async (value: boolean): Promise<void> => {
-    await profileStorage.setReviewerMode(value);
-    setReviewerModeState(value);
+    setLegacyProfile(null);
   }, []);
 
   const value = useMemo<ProfileContextValue>(
     () => ({
-      profile,
-      loading,
+      profile: activeProfile,
+      loading: authLoading || storageLoading,
       saveProfile,
       clearProfile,
-      reviewerMode,
-      setReviewerMode,
-      workerMode,
-      setWorkerMode,
     }),
-    [profile, loading, saveProfile, clearProfile, reviewerMode, setReviewerMode, workerMode],
+    [activeProfile, authLoading, storageLoading, saveProfile, clearProfile],
   );
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;

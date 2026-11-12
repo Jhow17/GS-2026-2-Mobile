@@ -1,222 +1,241 @@
 /**
- * Validação de formulários e guardas de tipo para dados externos
- * (AsyncStorage, cache e API). Nada entra no domínio sem passar por aqui.
+ * Guardas de tipo e validação dos formulários (clima, perfil, autenticação,
+ * novo/edição de ponto com GPS ou CEP, e relato de problema).
  */
-import { REQUIRE_PHOTO_FOR_NEW_POINT } from '../config/appConfig';
+import type { LoginInput, RegisterInput } from '../types/auth';
 import type { CitizenProfile, ProfileInput } from '../types/profile';
-import type { FountainReport, NewReportInput, ReportStatus } from '../types/report';
-import type {
-  NewSupportPointInput,
-  SupportPoint,
-  SupportPointStatus,
-  SupportPointType,
-} from '../types/supportPoint';
+import type { NewReportInput } from '../types/report';
+import type { NewSupportPointInput, PointLocationMode } from '../types/supportPoint';
 import type {
   AirQuality,
   AirQualityIndex,
   ForecastSlot,
   WeatherReading,
-  WeatherSource,
 } from '../types/weather';
+import { stripCep } from './formatters';
 import { isValidTime } from './time';
 
-/** Resultado padrão das validações de formulário. */
 export interface ValidationResult {
   valid: boolean;
   errors: Record<string, string>;
 }
 
-// ---------------------------------------------------------------------------
-// Guardas básicas
-// ---------------------------------------------------------------------------
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Verifica se o valor é um objeto simples (não nulo e não array). */
+/** Guarda: verifica se o valor é um objeto comum (não nulo e não array). */
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isString(value: unknown): value is string {
-  return typeof value === 'string';
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-function isBoolean(value: unknown): value is boolean {
-  return typeof value === 'boolean';
-}
-
-function isOptionalString(value: unknown): value is string | undefined {
-  return value === undefined || typeof value === 'string';
-}
-
-const POINT_TYPES: readonly SupportPointType[] = ['bebedouro', 'descanso', 'sombra', 'outro'];
-const POINT_STATUSES: readonly SupportPointStatus[] = [
-  'em_analise',
-  'aprovado',
-  'rejeitado',
-  'desativado',
-];
-const REPORT_STATUSES: readonly ReportStatus[] = ['aberto', 'resolvido'];
-const WEATHER_SOURCES: readonly WeatherSource[] = ['openweather', 'mock'];
-
-export function isSupportPointType(value: unknown): value is SupportPointType {
-  return POINT_TYPES.some((item) => item === value);
-}
-
-export function isSupportPointStatus(value: unknown): value is SupportPointStatus {
-  return POINT_STATUSES.some((item) => item === value);
-}
-
-export function isReportStatus(value: unknown): value is ReportStatus {
-  return REPORT_STATUSES.some((item) => item === value);
-}
-
-export function isAirQualityIndex(value: unknown): value is AirQualityIndex {
-  return value === 1 || value === 2 || value === 3 || value === 4 || value === 5;
-}
-
-function isWeatherSource(value: unknown): value is WeatherSource {
-  return WEATHER_SOURCES.some((item) => item === value);
-}
-
-export function isValidLatitude(value: unknown): value is number {
-  return isFiniteNumber(value) && value >= -90 && value <= 90;
-}
-
-export function isValidLongitude(value: unknown): value is number {
-  return isFiniteNumber(value) && value >= -180 && value <= 180;
-}
-
-// ---------------------------------------------------------------------------
-// Guardas de domínio (leitura do AsyncStorage e do cache)
-// ---------------------------------------------------------------------------
-
-export function isSupportPoint(value: unknown): value is SupportPoint {
-  if (!isRecord(value)) {
-    return false;
-  }
+/** Verifica se latitude e longitude são números finitos dentro dos limites da Terra. */
+export function isValidCoordinates(
+  latitude: unknown,
+  longitude: unknown,
+): boolean {
   return (
-    isString(value.id) &&
-    isSupportPointType(value.type) &&
-    isString(value.name) &&
-    isString(value.description) &&
-    isValidLatitude(value.latitude) &&
-    isValidLongitude(value.longitude) &&
-    isBoolean(value.is24h) &&
-    isString(value.opensAt) &&
-    isString(value.closesAt) &&
-    isBoolean(value.hasShade) &&
-    isBoolean(value.hasColdWater) &&
-    isBoolean(value.hasSeating) &&
-    isOptionalString(value.photoUri) &&
-    isSupportPointStatus(value.status) &&
-    isOptionalString(value.rejectionReason) &&
-    isString(value.ownerId) &&
-    isString(value.ownerName) &&
-    isString(value.createdAt) &&
-    isString(value.updatedAt)
+    typeof latitude === 'number' &&
+    typeof longitude === 'number' &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
   );
 }
 
+/** Guarda de tipo para CitizenProfile. */
 export function isCitizenProfile(value: unknown): value is CitizenProfile {
-  if (!isRecord(value)) {
-    return false;
-  }
   return (
-    isString(value.id) &&
-    isString(value.name) &&
-    isOptionalString(value.contact) &&
-    isString(value.createdAt)
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.createdAt === 'string' &&
+    (value.contact === undefined || typeof value.contact === 'string')
   );
 }
 
-export function isFountainReport(value: unknown): value is FountainReport {
-  if (!isRecord(value)) {
-    return false;
-  }
+/** Guarda de tipo para AirQualityIndex (1 a 5). */
+export function isAirQualityIndex(value: unknown): value is AirQualityIndex {
   return (
-    isString(value.id) &&
-    isString(value.pointId) &&
-    isString(value.description) &&
-    isOptionalString(value.photoUri) &&
-    isString(value.authorId) &&
-    isString(value.authorName) &&
-    isReportStatus(value.status) &&
-    isString(value.createdAt)
+    value === 1 || value === 2 || value === 3 || value === 4 || value === 5
   );
 }
 
-export function isWeatherReading(value: unknown): value is WeatherReading {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    isString(value.id) &&
-    isString(value.name) &&
-    isFiniteNumber(value.latitude) &&
-    isFiniteNumber(value.longitude) &&
-    isFiniteNumber(value.temperatureC) &&
-    isFiniteNumber(value.feelsLikeC) &&
-    isFiniteNumber(value.humidity) &&
-    isFiniteNumber(value.windSpeedMs) &&
-    isString(value.description) &&
-    isString(value.iconCode) &&
-    isString(value.readAt) &&
-    isWeatherSource(value.source)
-  );
-}
-
+/** Guarda de tipo para AirQuality. */
 export function isAirQuality(value: unknown): value is AirQuality {
-  return isRecord(value) && isAirQualityIndex(value.index) && isFiniteNumber(value.pm25);
+  return (
+    isRecord(value) &&
+    isAirQualityIndex(value.index) &&
+    typeof value.pm25 === 'number' &&
+    Number.isFinite(value.pm25)
+  );
 }
 
+/** Guarda de tipo para ForecastSlot. */
 export function isForecastSlot(value: unknown): value is ForecastSlot {
   return (
     isRecord(value) &&
-    isString(value.at) &&
-    isFiniteNumber(value.temperatureC) &&
-    isFiniteNumber(value.humidity)
+    typeof value.at === 'string' &&
+    typeof value.temperatureC === 'number' &&
+    Number.isFinite(value.temperatureC) &&
+    typeof value.humidity === 'number' &&
+    Number.isFinite(value.humidity)
   );
 }
 
+/** Guarda de tipo para lista de ForecastSlot. */
 export function isForecastSlotList(value: unknown): value is ForecastSlot[] {
   return Array.isArray(value) && value.every(isForecastSlot);
 }
 
-/** Cria uma guarda para listas a partir da guarda do item. */
-export function isArrayOf<T>(value: unknown, guard: (item: unknown) => item is T): value is T[] {
-  return Array.isArray(value) && value.every(guard);
+/** Guarda de tipo para WeatherReading. */
+export function isWeatherReading(value: unknown): value is WeatherReading {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    isValidCoordinates(value.latitude, value.longitude) &&
+    typeof value.temperatureC === 'number' &&
+    Number.isFinite(value.temperatureC) &&
+    typeof value.feelsLikeC === 'number' &&
+    Number.isFinite(value.feelsLikeC) &&
+    typeof value.humidity === 'number' &&
+    Number.isFinite(value.humidity) &&
+    typeof value.windSpeedMs === 'number' &&
+    Number.isFinite(value.windSpeedMs) &&
+    typeof value.description === 'string' &&
+    typeof value.iconCode === 'string' &&
+    typeof value.readAt === 'string' &&
+    (value.source === 'openweather' || value.source === 'mock')
+  );
 }
 
-// ---------------------------------------------------------------------------
-// Validação de formulários
-// ---------------------------------------------------------------------------
-
-function validateLength(
-  value: string,
-  min: number,
-  max: number,
-  field: string,
-  errors: Record<string, string>,
-  label: string,
-): void {
-  const length = value.trim().length;
-  if (length < min || length > max) {
-    errors[field] = `${label} deve ter de ${min} a ${max} caracteres.`;
-  }
+/** Valida CEP brasileiro (8 dígitos numéricos). */
+export function isValidCep(cep: string): boolean {
+  return stripCep(cep).length === 8;
 }
 
-/** Valida o formulário de novo ponto de apoio. */
-export function validatePointInput(input: NewSupportPointInput): ValidationResult {
+/** Valida os campos do perfil local (mantido para compatibilidade). */
+export function validateProfileInput(input: ProfileInput): ValidationResult {
   const errors: Record<string, string> = {};
+  const name = input.name.trim();
 
-  if (!isSupportPointType(input.type)) {
-    errors.type = 'Escolha o tipo do ponto.';
+  if (name.length < 2) {
+    errors.name = 'Informe seu nome ou apelido (mínimo 2 letras).';
+  } else if (name.length > 60) {
+    errors.name = 'Use no máximo 60 caracteres no nome.';
   }
-  validateLength(input.name, 3, 60, 'name', errors, 'O nome');
-  validateLength(input.description, 10, 280, 'description', errors, 'A descrição');
+
+  if (input.contact && input.contact.trim().length > 80) {
+    errors.contact = 'Use no máximo 80 caracteres no contato.';
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+/** Valida os campos da tela de Login (M5). */
+export function validateLoginInput(input: LoginInput): ValidationResult {
+  const errors: Record<string, string> = {};
+  const email = input.email.trim();
+
+  if (!email) {
+    errors.email = 'Informe seu e-mail.';
+  } else if (!EMAIL_PATTERN.test(email)) {
+    errors.email = 'Informe um e-mail válido.';
+  }
+
+  if (!input.password || input.password.length < 4) {
+    errors.password = 'Informe sua senha.';
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+/** Valida os campos da tela de Cadastro com CEP validado no ViaCEP (M5). */
+export function validateRegisterInput(
+  input: RegisterInput,
+  cepResolved: boolean,
+): ValidationResult {
+  const errors: Record<string, string> = {};
+  const name = input.name.trim();
+  const email = input.email.trim();
+
+  if (name.length < 2) {
+    errors.name = 'Informe seu nome completo ou apelido (mínimo 2 letras).';
+  } else if (name.length > 60) {
+    errors.name = 'Use no máximo 60 caracteres no nome.';
+  }
+
+  if (!email) {
+    errors.email = 'Informe seu e-mail.';
+  } else if (!EMAIL_PATTERN.test(email)) {
+    errors.email = 'Informe um e-mail válido (ex.: voce@email.com).';
+  }
+
+  if (!isValidCep(input.cep)) {
+    errors.cep = 'Informe um CEP válido no formato 00000-000.';
+  } else if (!cepResolved) {
+    errors.cep = 'Consulte um CEP existente antes de concluir o cadastro.';
+  }
+
+  if (!input.password || input.password.length < 6) {
+    errors.password = 'A senha deve ter pelo menos 6 caracteres.';
+  }
+
+  if (input.confirmPassword !== input.password) {
+    errors.confirmPassword = 'A confirmação de senha não confere.';
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+/** Valida o formulário de novo ponto ou edição de ponto de apoio (M8). */
+export function validatePointInput(
+  input: NewSupportPointInput,
+  locationMode: PointLocationMode = 'gps',
+): ValidationResult {
+  const errors: Record<string, string> = {};
+  const name = input.name.trim();
+  const description = input.description.trim();
+  const address = input.address.trim();
+
+  if (name.length < 3) {
+    errors.name = 'Informe o nome do local (mínimo 3 letras).';
+  } else if (name.length > 80) {
+    errors.name = 'Use no máximo 80 caracteres no nome.';
+  }
+
+  if (locationMode === 'cep') {
+    const struct = input.structuredAddress;
+    if (!struct?.cep || !isValidCep(struct.cep)) {
+      errors.cep = 'Informe um CEP válido com 8 dígitos.';
+    }
+    if (!struct?.street || struct.street.trim().length < 3) {
+      errors.street = 'Informe o logradouro (rua ou avenida).';
+    }
+    if (!struct?.number || struct.number.trim().length < 1) {
+      errors.number = 'Informe o número do local (ou digite S/N).';
+    }
+    if (!struct?.city || struct.city.trim().length < 2) {
+      errors.city = 'Consulte o CEP para preencher a cidade.';
+    }
+  } else {
+    if (address.length < 5) {
+      errors.address = 'Informe o endereço ou ponto de referência.';
+    }
+  }
+
+  if (description.length < 10) {
+    errors.description = 'Descreva o ponto (mínimo 10 caracteres).';
+  }
+
+  if (!isValidCoordinates(input.latitude, input.longitude)) {
+    errors.coordinates =
+      locationMode === 'cep'
+        ? 'Clique em "Localizar endereço no mapa" ou toque no mapa para marcar a posição.'
+        : 'Defina a localização no mapa ou aguarde o GPS.';
+  }
 
   if (!input.is24h) {
     if (!isValidTime(input.opensAt)) {
@@ -227,33 +246,20 @@ export function validatePointInput(input: NewSupportPointInput): ValidationResul
     }
   }
 
-  if (!isValidLatitude(input.latitude) || !isValidLongitude(input.longitude)) {
-    errors.location = 'Informe uma localização válida.';
-  }
-
-  if (REQUIRE_PHOTO_FOR_NEW_POINT && (!input.photoUri || input.photoUri.trim().length === 0)) {
-    errors.photo = 'Tire uma foto do local.';
-  }
-
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
-/** Valida o formulário de perfil. */
-export function validateProfileInput(input: ProfileInput): ValidationResult {
-  const errors: Record<string, string> = {};
-  validateLength(input.name, 3, 60, 'name', errors, 'O nome');
-  if (input.contact !== undefined && input.contact.trim().length > 80) {
-    errors.contact = 'O contato deve ter no máximo 80 caracteres.';
-  }
-  return { valid: Object.keys(errors).length === 0, errors };
-}
-
-/** Valida o formulário de relato de bebedouro avariado. */
+/** Valida o formulário de relato de problema em um ponto. */
 export function validateReportInput(input: NewReportInput): ValidationResult {
   const errors: Record<string, string> = {};
-  if (input.pointId.trim().length === 0) {
-    errors.pointId = 'Escolha o bebedouro.';
+
+  if (!input.pointId.trim()) {
+    errors.pointId = 'Escolha o ponto de apoio com problema.';
   }
-  validateLength(input.description, 10, 280, 'description', errors, 'A descrição');
+
+  if (input.description.trim().length < 10) {
+    errors.description = 'Explique o defeito encontrado (mínimo 10 caracteres).';
+  }
+
   return { valid: Object.keys(errors).length === 0, errors };
 }
