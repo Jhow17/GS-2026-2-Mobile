@@ -113,16 +113,16 @@ export function combineAlerts(first: AlertLevel, second: AlertLevel): AlertLevel
 /** Mensagem curta de orientaÃ§Ã£o para cada nÃ­vel. */
 export function getAlertMessage(level: AlertLevel): string {
   switch (level) {
-    case 'normal':
-      return 'CondiÃ§Ãµes tranquilas. Mantenha-se hidratado durante o trabalho.';
-    case 'atencao':
-      return 'Hidrate-se com frequÃªncia e leve Ã¡gua com vocÃª.';
-    case 'cuidado':
-      return 'FaÃ§a pausas na sombra e beba Ã¡gua a cada 20 minutos.';
-    case 'perigo':
-      return 'Reduza o esforÃ§o, faÃ§a pausas longas na sombra e evite o sol do meio-dia.';
-    case 'perigo_extremo':
-      return 'Evite a exposiÃ§Ã£o. Procure um local fresco e interrompa atividades pesadas.';
+case 'normal':
+  return 'Condições tranquilas. Mantenha-se hidratado durante o trabalho.';
+case 'atencao':
+  return 'Hidrate-se com frequência e leve água com você.';
+case 'cuidado':
+  return 'Faça pausas na sombra e beba água a cada 20 minutos.';
+case 'perigo':
+  return 'Reduza os esforços, faça pausas longas na sombra e evite o sol do meio-dia.';
+case 'perigo_extremo':
+  return 'Evite a exposição. Procure um local fresco e interrompa atividades pesadas.';
   }
 }
 
