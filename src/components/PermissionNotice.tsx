@@ -1,12 +1,13 @@
 /**
- * Aviso de permissão (localização ou câmera) com explicação e botão
- * adequado ao estado formal: "Permitir" ou "Abrir configurações".
+ * Aviso de permissão (localização ou câmera) com ícone vetorial, explicação
+ * e botão adequado ao estado formal: "Permitir" ou "Abrir configurações".
  */
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '../theme/colors';
 import { fontSize, radius, spacing } from '../theme/spacing';
 import type { LocationPermissionState } from '../types/location';
+import { AppIcon } from './AppIcon';
 import { CustomButton } from './CustomButton';
 
 interface PermissionNoticeProps {
@@ -28,7 +29,8 @@ export function PermissionNotice({
     return null;
   }
 
-  const needsSettings = permission === 'blocked' || permission === 'services_disabled';
+  const needsSettings =
+    permission === 'blocked' || permission === 'services_disabled';
   const statusHelp =
     permission === 'blocked'
       ? 'A permissão está bloqueada no sistema. Abra as configurações do aplicativo para liberar.'
@@ -38,10 +40,13 @@ export function PermissionNotice({
 
   return (
     <View style={styles.card} accessibilityRole="alert">
-      <Text style={styles.title}>📍 {title}</Text>
+      <View style={styles.headerRow}>
+        <AppIcon name="map-pin" size={18} color={colors.warning} />
+        <Text style={styles.title}>{title}</Text>
+      </View>
       <Text style={styles.description}>{statusHelp}</Text>
       <CustomButton
-        title={needsSettings ? 'Abrir configurações' : 'Permitir'}
+        title={needsSettings ? 'Abrir configurações' : 'Permitir acesso'}
         variant={needsSettings ? 'outline' : 'primary'}
         compact
         onPress={needsSettings ? onOpenSettings : onRequestPermission}
@@ -56,8 +61,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warningLight,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.secondary,
+    borderColor: colors.warningBorder,
     padding: spacing.md,
+    gap: spacing.xs,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.xs,
   },
   title: {
@@ -68,9 +78,11 @@ const styles = StyleSheet.create({
   description: {
     fontSize: fontSize.small,
     fontWeight: '400',
-    color: colors.text,
+    color: colors.textSecondary,
+    lineHeight: 20,
   },
   button: {
     alignSelf: 'flex-start',
+    marginTop: spacing.xxs,
   },
 });

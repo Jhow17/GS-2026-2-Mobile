@@ -1,24 +1,34 @@
 /**
- * Estado vazio com título, mensagem e ação opcional.
+ * Estado vazio com ícone vetorial, título, mensagem e ação opcional (zero emojis - M1).
  */
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '../theme/colors';
-import { fontSize, spacing } from '../theme/spacing';
+import { fontSize, radius, spacing } from '../theme/spacing';
+import type { AppIconName } from '../utils/formatters';
+import { AppIcon } from './AppIcon';
 import { CustomButton } from './CustomButton';
 
 interface EmptyStateProps {
   title: string;
   message: string;
-  icon?: string;
+  icon?: AppIconName;
   actionLabel?: string;
   onAction?: () => void;
 }
 
-export function EmptyState({ title, message, icon = '📭', actionLabel, onAction }: EmptyStateProps) {
+export function EmptyState({
+  title,
+  message,
+  icon = 'inbox',
+  actionLabel,
+  onAction,
+}: EmptyStateProps) {
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>{icon}</Text>
+      <View style={styles.iconCircle}>
+        <AppIcon name={icon} size={28} color={colors.primary} />
+      </View>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.message}>{message}</Text>
       {actionLabel && onAction ? (
@@ -35,9 +45,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.lg,
     gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  icon: {
-    fontSize: 40,
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xxs,
   },
   title: {
     fontSize: fontSize.title,
@@ -46,13 +66,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   message: {
-    fontSize: fontSize.body,
+    fontSize: fontSize.small,
     fontWeight: '400',
     color: colors.textMuted,
     textAlign: 'center',
+    lineHeight: 20,
   },
   button: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     alignSelf: 'stretch',
   },
 });

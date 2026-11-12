@@ -1,10 +1,11 @@
 /**
- * Estado de erro com mensagem amigável e botão "Tentar de novo".
+ * Estado de erro com ícone vetorial, mensagem amigável e botão "Tentar de novo".
  */
 import { StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '../theme/colors';
-import { fontSize, spacing } from '../theme/spacing';
+import { fontSize, radius, spacing } from '../theme/spacing';
+import { AppIcon } from './AppIcon';
 import { CustomButton } from './CustomButton';
 
 interface ErrorStateProps {
@@ -15,10 +16,17 @@ interface ErrorStateProps {
 export function ErrorState({ message, onRetry }: ErrorStateProps) {
   return (
     <View style={styles.container} accessibilityRole="alert">
-      <Text style={styles.icon}>⚠️</Text>
+      <View style={styles.iconCircle}>
+        <AppIcon name="alert-triangle" size={28} color={colors.danger} />
+      </View>
       <Text style={styles.title}>Algo deu errado</Text>
       <Text style={styles.message}>{message}</Text>
-      <CustomButton title="Tentar de novo" onPress={onRetry} style={styles.button} />
+      <CustomButton
+        title="Tentar de novo"
+        icon="refresh-cw"
+        onPress={onRetry}
+        style={styles.button}
+      />
     </View>
   );
 }
@@ -31,8 +39,14 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.xs,
   },
-  icon: {
-    fontSize: 40,
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.pill,
+    backgroundColor: colors.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xxs,
   },
   title: {
     fontSize: fontSize.title,
