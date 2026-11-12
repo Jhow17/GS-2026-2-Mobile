@@ -1,9 +1,8 @@
 /**
- * Configuração central do CitizenTech.
- * Todas as constantes ficam aqui, tipadas e comentadas.
+ * Configurações gerais do app, leitura das variáveis públicas do Expo
+ * e lista dos 10 pontos monitorados de São Paulo.
  */
 
-/** Ponto monitorado da cidade para o ranking de "pontos mais quentes". */
 export interface MonitoredPoint {
   id: string;
   name: string;
@@ -11,7 +10,6 @@ export interface MonitoredPoint {
   longitude: number;
 }
 
-/** Região inicial do mapa (formato aceito pelo react-native-maps). */
 export interface MapRegion {
   latitude: number;
   longitude: number;
@@ -19,39 +17,46 @@ export interface MapRegion {
   longitudeDelta: number;
 }
 
-/** Chave da OpenWeather lida do .env (EXPO_PUBLIC_ fica embutida no app). */
-export const OPENWEATHER_API_KEY: string = process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY ?? '';
+/** Chave da OpenWeather vinda do ambiente (vazia se não configurada). */
+export const OPENWEATHER_API_KEY: string =
+  (process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY ?? '').trim();
 
-/** URL base da API de dados (Current, Forecast e Air Pollution). */
+/** Indica se há chave configurada para consultar a API real. */
+export const HAS_API_KEY: boolean = OPENWEATHER_API_KEY.length > 0;
+
+/** Usa o mock determinístico quando não há chave configurada. */
+export const SHOULD_USE_MOCK_WEATHER: boolean = !HAS_API_KEY;
+
+/** Desconto (em °C) aplicado aos limiares no perfil "Trabalho na rua". */
+export const WORKER_PROFILE_OFFSET_C = 2;
+
+/**
+ * Credenciais da conta de Administrador semeada localmente (M5).
+ * AVISO DE SEGURANÇA: Em um app 100% client-side (prova de conceito sem backend),
+ * variáveis EXPO_PUBLIC_* e dados no AsyncStorage ficam no dispositivo. Em produção,
+ * autenticação e controle de papel (RBAC) devem residir em um servidor seguro.
+ */
+export const ADMIN_SEED_EMAIL: string = (
+  process.env.EXPO_PUBLIC_ADMIN_EMAIL ?? 'admin@citizentech.org'
+)
+  .trim()
+  .toLowerCase();
+
+export const ADMIN_SEED_PASSWORD: string = (
+  process.env.EXPO_PUBLIC_ADMIN_PASSWORD ?? 'Admin@2026'
+).trim();
+
+/** Endereço base da API 2.5 da OpenWeather. */
 export const OPENWEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
 
-/** URL base dos tiles do Weather Maps 1.0. */
+/** Endereço base dos tiles do Weather Maps 1.0. */
 export const OPENWEATHER_TILES_URL = 'https://tile.openweathermap.org/map';
 
-/**
- * true força dados fixos do mockWeatherService (demonstração sem internet).
- * Mesmo com false, o mock é usado automaticamente quando a chave está ausente.
- */
-export const USE_MOCK_WEATHER: boolean = false;
+/** Modelo de URL dos tiles do Weather Maps 1.0. */
+export const OPENWEATHER_TILE_URL_TEMPLATE =
+  'https://tile.openweathermap.org/map/{layer}/{z}/{x}/{y}.png?appid={apiKey}';
 
-/** Indica se os services de clima devem usar o mock. */
-export const SHOULD_USE_MOCK_WEATHER: boolean =
-  USE_MOCK_WEATHER || OPENWEATHER_API_KEY.trim().length === 0;
-
-/** Tempo de vida do cache, em milissegundos. */
-export const CACHE_TTL_MS = {
-  /** Clima atual: 10 minutos. */
-  current: 10 * 60 * 1000,
-  /** Qualidade do ar: 10 minutos. */
-  air: 10 * 60 * 1000,
-  /** Previsão de 5 dias / 3 horas: 30 minutos. */
-  forecast: 30 * 60 * 1000,
-} as const;
-
-/**
- * Região usada quando não há localização.
- * PLACEHOLDER: centro de São Paulo (Praça da Sé). O grupo deve ajustar para a cidade escolhida.
- */
+/** Região inicial: centro de São Paulo (usada quando a localização não está disponível). */
 export const DEFAULT_REGION: MapRegion = {
   latitude: -23.5505,
   longitude: -46.6333,
@@ -59,28 +64,25 @@ export const DEFAULT_REGION: MapRegion = {
   longitudeDelta: 0.08,
 };
 
+/** Tempo de vida do cache (em milissegundos) usado pelo weatherService. */
+export const CACHE_TTL_MS = {
+  current: 15 * 60 * 1000,
+  forecast: 30 * 60 * 1000,
+  air: 15 * 60 * 1000,
+} as const;
+
 /**
- * Pontos monitorados para o ranking de calor.
- * PLACEHOLDERS em São Paulo: ajuste nomes e coordenadas para a cidade do grupo.
+ * Dez regiões de São Paulo consultadas para montar o ranking de pontos mais quentes.
  */
-export const MONITORED_POINTS: MonitoredPoint[] = [
-  { id: 'mp-se', name: 'Praça da Sé', latitude: -23.5505, longitude: -46.6333 },
-  { id: 'mp-paulista', name: 'Av. Paulista', latitude: -23.5614, longitude: -46.6559 },
-  { id: 'mp-pinheiros', name: 'Largo da Batata', latitude: -23.5670, longitude: -46.6930 },
-  { id: 'mp-ibirapuera', name: 'Parque Ibirapuera', latitude: -23.5874, longitude: -46.6576 },
-  { id: 'mp-bras', name: 'Brás', latitude: -23.5432, longitude: -46.6166 },
-  { id: 'mp-santana', name: 'Santana', latitude: -23.5025, longitude: -46.6252 },
-  { id: 'mp-tatuape', name: 'Tatuapé', latitude: -23.5402, longitude: -46.5763 },
-  { id: 'mp-santoamaro', name: 'Santo Amaro', latitude: -23.6536, longitude: -46.7097 },
-  { id: 'mp-lapa', name: 'Lapa', latitude: -23.5226, longitude: -46.7036 },
-  { id: 'mp-itaquera', name: 'Itaquera', latitude: -23.5367, longitude: -46.4553 },
+export const MONITORED_POINTS: readonly MonitoredPoint[] = [
+  { id: 'sp_se', name: 'Sé (Centro)', latitude: -23.5505, longitude: -46.6333 },
+  { id: 'sp_paulista', name: 'Av. Paulista', latitude: -23.5614, longitude: -46.6558 },
+  { id: 'sp_pinheiros', name: 'Pinheiros', latitude: -23.5673, longitude: -46.7019 },
+  { id: 'sp_ibirapuera', name: 'Parque Ibirapuera', latitude: -23.5874, longitude: -46.6576 },
+  { id: 'sp_mooca', name: 'Mooca', latitude: -23.5558, longitude: -46.5967 },
+  { id: 'sp_tatuape', name: 'Tatuapé', latitude: -23.5403, longitude: -46.5766 },
+  { id: 'sp_santana', name: 'Santana (Zona Norte)', latitude: -23.5015, longitude: -46.6248 },
+  { id: 'sp_santo_amaro', name: 'Santo Amaro (Zona Sul)', latitude: -23.6528, longitude: -46.7069 },
+  { id: 'sp_itaquera', name: 'Itaquera (Zona Leste)', latitude: -23.5419, longitude: -46.4556 },
+  { id: 'sp_lapa', name: 'Lapa (Zona Oeste)', latitude: -23.5208, longitude: -46.7014 },
 ];
-
-/** Deslocamento (°C) das faixas de alerta no perfil "trabalhador na rua". */
-export const WORKER_PROFILE_OFFSET_C = 2;
-
-/** Exige foto da câmera para cadastrar um ponto novo. */
-export const REQUIRE_PHOTO_FOR_NEW_POINT = true;
-
-/** Raio (metros) considerado "perto" na tela inicial e na escolha de bebedouros. */
-export const NEARBY_RADIUS_METERS = 2000;
