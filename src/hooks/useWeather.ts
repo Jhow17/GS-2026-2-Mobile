@@ -6,9 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DEFAULT_REGION } from '../config/appConfig';
 import { buildForecastHeatSlots, buildWeatherAlert, getAlertLevel } from '../services/heatIndexService';
+import * as notificationService from '../services/notificationService';
 import * as weatherService from '../services/weatherService';
 import type { Coordinates } from '../types/location';
 import type { HotSpot, WeatherBundle } from '../types/weather';
+import { useProfile } from './useProfile';
 
 export interface UseWeatherResult {
   bundle: WeatherBundle | null;
@@ -18,6 +20,7 @@ export interface UseWeatherResult {
   refreshing: boolean;
   error: string | null;
   reload: () => Promise<void>;
+  sendTestAlert: () => Promise<boolean>;
 }
 
 const BUNDLE_ERROR = 'Não foi possível carregar o clima agora. Verifique sua conexão.';
@@ -32,6 +35,7 @@ export function useWeather(
   coordinates: Coordinates | null,
   workerMode: boolean = false,
 ): UseWeatherResult {
+  const { heatAlertsEnabled, notificationPermission } = useProfile();
   const latitude = roundCoordinate(coordinates?.latitude ?? DEFAULT_REGION.latitude);
   const longitude = roundCoordinate(coordinates?.longitude ?? DEFAULT_REGION.longitude);
 
@@ -121,5 +125,21 @@ export function useWeather(
     [rawHotSpots, workerMode],
   );
 
-  return { bundle, hotSpots, hotSpotsError, loading, refreshing, error, reload };
+  // Sincroniza notificações locais (alerta imediato com cooldown + agendamento preditivo)
+  useEffect(() => {
+    if (!bundle) {
+      return;
+    }
+    if (!heatAlertsEnabled) {
+      void notificationService.cancelAllHeatNotifications();
+      return;
+    }
+    void notificationService.syncHeatNotifications(bundle, workerMode);
+  }, [bundle, workerMode, heatAlertsEnabled, notificationPermission]);
+
+  const sendTestAlert = useCallback((): Promise<boolean> => {
+    return notificationService.sendTestHeatNotification(bundle);
+  }, [bundle]);
+
+  return { bundle, hotSpots, hotSpotsError, loading, refreshing, error, reload, sendTestAlert };
 }

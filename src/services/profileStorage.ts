@@ -10,6 +10,7 @@ import { readStoredJson, removeStoredKey, STORAGE_PREFIX, writeStoredJson } from
 const PROFILE_KEY = `${STORAGE_PREFIX}profile`;
 const REVIEWER_MODE_KEY = `${STORAGE_PREFIX}reviewer_mode`;
 const WORKER_MODE_KEY = `${STORAGE_PREFIX}worker_mode`;
+const HEAT_ALERTS_KEY = `${STORAGE_PREFIX}heat_alerts_enabled`;
 
 function isProfileOrNull(value: unknown): value is CitizenProfile | null {
   return value === null || isCitizenProfile(value);
@@ -64,4 +65,14 @@ export async function getWorkerMode(): Promise<boolean> {
 /** Salva a preferência "Trabalho na rua". */
 export async function setWorkerMode(value: boolean): Promise<void> {
   await writeStoredJson(WORKER_MODE_KEY, value);
+}
+
+/** Lê a preferência de alertas de calor por notificação (padrão: ligado). */
+export async function getHeatAlertsEnabled(): Promise<boolean> {
+  return readStoredJson(HEAT_ALERTS_KEY, isBooleanValue, true);
+}
+
+/** Salva a preferência de alertas de calor por notificação. */
+export async function setHeatAlertsEnabled(value: boolean): Promise<void> {
+  await writeStoredJson(HEAT_ALERTS_KEY, value);
 }

@@ -12,6 +12,7 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useMemo } from 'react';
 import {
+  Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -23,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AlertCard } from '../components/AlertCard';
+import { CustomButton } from '../components/CustomButton';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { ForecastStrip } from '../components/ForecastStrip';
@@ -49,7 +51,15 @@ type WeatherNavigation = CompositeNavigationProp<
 
 export function HomeScreen() {
   const navigation = useNavigation<WeatherNavigation>();
-  const { workerMode, setWorkerMode } = useProfile();
+  const {
+    workerMode,
+    setWorkerMode,
+    heatAlertsEnabled,
+    setHeatAlertsEnabled,
+    notificationPermission,
+    requestNotificationPermission,
+    openNotificationSettings,
+  } = useProfile();
   const {
     coordinates,
     permission,
@@ -65,6 +75,7 @@ export function HomeScreen() {
     refreshing,
     error,
     reload,
+    sendTestAlert,
   } = useWeather(coordinates, workerMode);
 
   const { points } = useSupportPoints();
@@ -112,6 +123,16 @@ export function HomeScreen() {
     },
     [navigation],
   );
+
+  const handleTestNotification = useCallback(async (): Promise<void> => {
+    const sent = await sendTestAlert();
+    if (!sent) {
+      Alert.alert(
+        'Atenção',
+        'Permita as notificações nas configurações do aparelho para receber os alertas de calor.',
+      );
+    }
+  }, [sendTestAlert]);
 
   const renderHotSpot = useCallback(
     ({ item, index }: ListRenderItemInfo<HotSpot>) => (
@@ -186,6 +207,49 @@ export function HomeScreen() {
           trackColor={{ false: colors.borderStrong, true: colors.primaryLight }}
           thumbColor={workerMode ? colors.primary : colors.surface}
         />
+      </View>
+
+      <View style={styles.notificationCard}>
+        <View style={styles.notificationRow}>
+          <View style={styles.workerText}>
+            <Text style={styles.workerTitle}>Notificações de calor extremo</Text>
+            <Text style={styles.workerSubtitle}>
+              Avisa no celular quando o índice atinge risco alto ou há pico previsto nas próximas horas
+            </Text>
+          </View>
+          <Switch
+            accessibilityLabel="Alternar notificações de calor extremo"
+            value={heatAlertsEnabled}
+            onValueChange={(value) => {
+              void setHeatAlertsEnabled(value);
+            }}
+            trackColor={{ false: colors.borderStrong, true: colors.primaryLight }}
+            thumbColor={heatAlertsEnabled ? colors.primary : colors.surface}
+          />
+        </View>
+
+        {heatAlertsEnabled &&
+        (notificationPermission === 'denied' || notificationPermission === 'blocked') ? (
+          <PermissionNotice
+            title="Permissão de notificações desativada"
+            description="Ative a permissão para receber alertas de calor mesmo com o aplicativo fechado."
+            permission={notificationPermission}
+            onRequestPermission={requestNotificationPermission}
+            onOpenSettings={openNotificationSettings}
+          />
+        ) : null}
+
+        {heatAlertsEnabled ? (
+          <CustomButton
+            title="Testar notificação de alerta agora"
+            icon="bell"
+            variant="outline"
+            compact
+            onPress={() => {
+              void handleTestNotification();
+            }}
+          />
+        ) : null}
       </View>
 
       <WeatherSummary reading={bundle.current} />
@@ -288,6 +352,21 @@ const styles = StyleSheet.create({
     fontSize: fontSize.caption,
     fontWeight: '400',
     color: colors.textMuted,
+  },
+  notificationCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.sm,
+    ...cardShadow,
+  },
+  notificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
   section: {
     gap: spacing.xs,
