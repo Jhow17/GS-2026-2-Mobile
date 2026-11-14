@@ -4,16 +4,20 @@
   "main": "index.ts",
   "authors": [
     {
-      "name": "Nome",
-      "rm": "RM00000"
+      "name": "Jonathan Henrique da Silva",
+      "rm": "RM561139"
     },
     {
-      "name": "Nome",
-      "rm": "RM00000"
+      "name": "Musashi Nascimento Mabuti",
+      "rm": "RM559444"
     },
     {
-      "name": "Nome",
-      "rm": "RM00000"
+      "name": "Marcos Vinicius Gonçalves Santos",
+      "rm": "RM560062"
+    },
+    {
+      "name": "Felipe Gimenes",
+      "rm": "RM99799"
     }
   ],
   "scripts": {
