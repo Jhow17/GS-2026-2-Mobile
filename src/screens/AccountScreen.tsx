@@ -11,12 +11,14 @@ import {
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppIcon } from '../components/AppIcon';
 import { CustomButton } from '../components/CustomButton';
+import { PermissionNotice } from '../components/PermissionNotice';
 import { useAuth } from '../hooks/useAuth';
+import { useProfile } from '../hooks/useProfile';
 import { useSupportPoints } from '../hooks/useSupportPoints';
 import { colors } from '../theme/colors';
 import { cardShadow, fontSize, radius, spacing } from '../theme/spacing';
@@ -30,6 +32,13 @@ type AccountNavigation = CompositeNavigationProp<
 export function AccountScreen() {
   const navigation = useNavigation<AccountNavigation>();
   const { session, isAdmin, logout } = useAuth();
+  const {
+    heatAlertsEnabled,
+    setHeatAlertsEnabled,
+    notificationPermission,
+    requestNotificationPermission,
+    openNotificationSettings,
+  } = useProfile();
   const { points } = useSupportPoints();
 
   const myPointsCount = session
@@ -130,6 +139,34 @@ export function AccountScreen() {
                 : ''}
             </Text>
           </View>
+        </View>
+
+        <View style={styles.menuCard}>
+          <Text style={styles.sectionTitle}>Alertas de calor extremo</Text>
+          <View style={styles.preferenceRow}>
+            <Text style={styles.preferenceText}>
+              Receber notificações quando o índice de calor atingir níveis de risco
+            </Text>
+            <Switch
+              accessibilityLabel="Receber alertas de calor extremo"
+              value={heatAlertsEnabled}
+              onValueChange={(value) => {
+                void setHeatAlertsEnabled(value);
+              }}
+              trackColor={{ false: colors.borderStrong, true: colors.primaryLight }}
+              thumbColor={heatAlertsEnabled ? colors.primary : colors.surface}
+            />
+          </View>
+          {heatAlertsEnabled &&
+          (notificationPermission === 'denied' || notificationPermission === 'blocked') ? (
+            <PermissionNotice
+              title="Permissão de notificações"
+              description="Permita o envio de notificações para receber alertas de calor no aparelho."
+              permission={notificationPermission}
+              onRequestPermission={requestNotificationPermission}
+              onOpenSettings={openNotificationSettings}
+            />
+          ) : null}
         </View>
 
         <View style={styles.menuCard}>
@@ -295,5 +332,17 @@ const styles = StyleSheet.create({
   sectionDescription: {
     fontSize: fontSize.small,
     color: colors.textMuted,
+  },
+  preferenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  preferenceText: {
+    flex: 1,
+    fontSize: fontSize.small,
+    color: colors.textSecondary,
+    lineHeight: 20,
   },
 });
