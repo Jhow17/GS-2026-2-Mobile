@@ -25,7 +25,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -34,6 +35,7 @@
     "plugins": [
       "expo-status-bar",
       "expo-font",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
