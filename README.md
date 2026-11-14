@@ -1,6 +1,6 @@
 # CitizenTech — Apoio Térmico Urbano para Trabalhadores Conectados
 
-Aplicativo mobile em **React Native (Expo SDK 55)** e **TypeScript estrito** voltado à mitigação de ondas de calor para entregadores, trabalhadores ao ar livre e cidadãos em São Paulo.
+Aplicativo mobile em **React Native (Expo SDK 58)** e **TypeScript estrito** voltado à mitigação de ondas de calor para entregadores, trabalhadores ao ar livre e cidadãos em São Paulo.
 
 ---
 

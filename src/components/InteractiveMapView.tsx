@@ -284,7 +284,7 @@ export function InteractiveMapView({
   onPickCoordinates,
   style,
 }: InteractiveMapViewProps) {
-  const webViewRef = useRef<WebView | null>(null);
+  const webViewRef = useRef<WebView<unknown> | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const lastCenterRef = useRef<string>('');
 
@@ -382,7 +382,7 @@ export function InteractiveMapView({
 
   return (
     <View style={[styles.container, style]}>
-      <WebView
+      <WebView<unknown>
         ref={webViewRef}
         originWhitelist={['*']}
         source={{ html: INITIAL_HTML, baseUrl: 'https://citizentech.org' }}
