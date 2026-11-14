@@ -174,22 +174,22 @@ const SEED_POINTS: readonly SupportPoint[] = [
   },
   {
     id: 'seed_6',
-    type: 'sombra',
-    name: 'Parque da Juventude — Área de Descanso',
-    description: 'Gramado arborizado com quiosques cobertos e bebedouros.',
-    address: 'Av. Cruzeiro do Sul, 2630 - Santana, São Paulo/SP · CEP 02030-100',
+    type: 'descanso',
+    name: 'Jundiaí Shopping',
+    description: 'Descubra o Jundiaí Shopping, o melhor shopping da região com uma variedade de lojas, restaurantes e entretenimento para toda a família. com quiosques cobertos e bebedouros.',
+    address: 'Av. 9 de Julho, 3333 - Anhangabaú, Jundiaí - SP, 13208-056',
     structuredAddress: {
-      cep: '02030-100',
-      street: 'Av. Cruzeiro do Sul',
-      number: '2630',
-      neighborhood: 'Santana',
-      city: 'São Paulo',
+      cep: '13208-056',
+      street: 'Av. 9 de Julho',
+      number: '3333',
+      neighborhood: 'Anhangabaú',
+      city: 'Jundiaí',
       state: 'SP',
     },
-    latitude: -23.5072,
-    longitude: -46.6245,
-    opensAt: '06:00',
-    closesAt: '19:00',
+    latitude: -23.1991964,
+    longitude: -46.8903755,
+    opensAt: '10:00',
+    closesAt: '22:00',
     is24h: false,
     amenities: ['agua_potavel', 'banheiro', 'banco', 'sombra_coberta'],
     status: 'approved',
@@ -308,6 +308,29 @@ export async function ensureSeededPoints(): Promise<SupportPoint[]> {
     await writeStoredJson(POINTS_KEY, activeSeeds);
     return [...activeSeeds];
   }
+
+  let syncedChanged = false;
+  const synced = current.map((item) => {
+    if (item.createdBy === 'seed' && !item.updatedAt) {
+      const latestSeed = activeSeeds.find((seed) => seed.id === item.id);
+      if (
+        latestSeed &&
+        (latestSeed.name !== item.name ||
+          latestSeed.address !== item.address ||
+          latestSeed.latitude !== item.latitude ||
+          latestSeed.longitude !== item.longitude)
+      ) {
+        syncedChanged = true;
+        return latestSeed;
+      }
+    }
+    return item;
+  });
+  if (syncedChanged) {
+    await writeStoredJson(POINTS_KEY, synced);
+    return synced;
+  }
+
   return current;
 }
 

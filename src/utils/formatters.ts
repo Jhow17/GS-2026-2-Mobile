@@ -47,7 +47,9 @@ export type AppIconName =
   | 'mail'
   | 'chevron-right'
   | 'external-link'
-  | 'layers';
+  | 'layers'
+  | 'bell'
+  | 'bell-off';
 
 /** Temperatura arredondada: "32 °C". */
 export function formatTemperature(celsius: number): string {

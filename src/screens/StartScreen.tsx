@@ -9,9 +9,11 @@ import {
   type CompositeNavigationProp,
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -32,6 +34,7 @@ import { PermissionNotice } from '../components/PermissionNotice';
 import { PointListItem } from '../components/PointListItem';
 import { useAuth } from '../hooks/useAuth';
 import { useLocation } from '../hooks/useLocation';
+import { useProfile } from '../hooks/useProfile';
 import { useSupportPoints } from '../hooks/useSupportPoints';
 import { useWeather } from '../hooks/useWeather';
 import { getAlertMessage } from '../services/heatIndexService';
@@ -41,6 +44,7 @@ import type { RootStackParamList, RootTabParamList } from '../types/navigation';
 import type { PointType, SupportPoint } from '../types/supportPoint';
 import { calculateDistanceMeters } from '../utils/distance';
 import {
+  airQualityLabels,
   formatDateTime,
   pointTypeIconNames,
   pointTypeLabels,
@@ -68,9 +72,11 @@ const FILTER_TYPES: readonly (PointType | 'all')[] = [
 export function StartScreen() {
   const navigation = useNavigation<StartNavigation>();
   const { session, isAdmin, logout } = useAuth();
-  const [workerMode, setWorkerMode] = useState(true);
+  const { workerMode, setWorkerMode } = useProfile();
   const [selectedType, setSelectedType] = useState<PointType | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const flatListRef = useRef<FlatList<PointWithDistance> | null>(null);
+  const searchBoxYRef = useRef(0);
 
   const {
     coordinates,
@@ -262,6 +268,11 @@ export function StartScreen() {
           level={bundle.alert.combinedLevel}
           heatIndexC={bundle.alert.heatIndexC}
           message={getAlertMessage(bundle.alert.combinedLevel)}
+          airNote={
+            bundle.alert.combinedLevel !== bundle.alert.heatLevel
+              ? `Nível elevado pela qualidade do ar (${airQualityLabels[bundle.airQuality.index]}).`
+              : undefined
+          }
           updatedLabel={updatedLabel}
           nearestPoint={nearestPoint}
           onOpenNearestPoint={handleOpenNearestById}
@@ -280,7 +291,9 @@ export function StartScreen() {
           <Switch
             accessibilityLabel="Alternar modo trabalho na rua"
             value={workerMode}
-            onValueChange={setWorkerMode}
+            onValueChange={(value) => {
+              void setWorkerMode(value);
+            }}
             trackColor={{ false: colors.borderStrong, true: colors.primaryLight }}
             thumbColor={workerMode ? colors.primary : colors.surface}
           />
@@ -336,7 +349,12 @@ export function StartScreen() {
       </View>
 
       {/* Busca textual */}
-      <View style={styles.searchBox}>
+      <View
+        style={styles.searchBox}
+        onLayout={(event) => {
+          searchBoxYRef.current = event.nativeEvent.layout.y;
+        }}
+      >
         <AppIcon name="search" size={18} color={colors.textMuted} />
         <TextInput
           accessibilityLabel="Buscar ponto de apoio por nome ou endereço"
@@ -344,6 +362,15 @@ export function StartScreen() {
           placeholderTextColor={colors.textMuted}
           value={searchQuery}
           onChangeText={setSearchQuery}
+          onFocus={() => {
+            setTimeout(() => {
+              flatListRef.current?.scrollToOffset({
+                offset: Math.max(0, searchBoxYRef.current - spacing.sm),
+                animated: true,
+              });
+            }, 120);
+          }}
+          returnKeyType="search"
           style={styles.searchInput}
         />
         {searchQuery.length > 0 ? (
@@ -394,32 +421,41 @@ export function StartScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <FlatList
-        data={filteredPoints}
-        keyExtractor={keyExtractor}
-        renderItem={renderItem}
-        ListHeaderComponent={listHeader}
-        ListEmptyComponent={
-          <EmptyState
-            icon="map-pin"
-            title="Nenhum ponto encontrado"
-            message="Tente limpar a busca ou escolher outra categoria de ponto de apoio."
-            actionLabel="Mostrar todos"
-            onAction={() => {
-              setSelectedType('all');
-              setSearchQuery('');
-            }}
-          />
-        }
-        refreshControl={
-          <RefreshControl
-            refreshing={weatherRefreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.primary]}
-          />
-        }
-        contentContainerStyle={styles.listContent}
-      />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.select({ ios: 'padding', android: undefined })}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={filteredPoints}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          ListHeaderComponent={listHeader}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets
+          ListEmptyComponent={
+            <EmptyState
+              icon="map-pin"
+              title="Nenhum ponto encontrado"
+              message="Tente limpar a busca ou escolher outra categoria de ponto de apoio."
+              actionLabel="Mostrar todos"
+              onAction={() => {
+                setSelectedType('all');
+                setSearchQuery('');
+              }}
+            />
+          }
+          refreshControl={
+            <RefreshControl
+              refreshing={weatherRefreshing}
+              onRefresh={handleRefresh}
+              colors={[colors.primary]}
+            />
+          }
+          contentContainerStyle={styles.listContent}
+        />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -428,6 +464,9 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
   },
   listContent: {
     padding: spacing.md,

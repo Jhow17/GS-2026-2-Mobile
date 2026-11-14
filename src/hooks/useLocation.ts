@@ -4,7 +4,7 @@
  * Ao voltar das configurações do sistema, revalida a permissão.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState } from 'react-native';
 
 import * as locationService from '../services/locationService';
 import type { Coordinates, LocationPermissionState } from '../types/location';
@@ -75,7 +75,7 @@ export function useLocation(options: UseLocationOptions = {}): UseLocationResult
 
   // Ao voltar para o app (ex.: depois de abrir as configurações), revalida.
   useEffect(() => {
-    let previous: AppStateStatus = AppState.currentState;
+    let previous: string = AppState.currentState ?? 'active';
     const subscription = AppState.addEventListener('change', (next) => {
       if (previous.match(/inactive|background/) && next === 'active') {
         loadLocation();
