@@ -73,12 +73,12 @@ export function calculateHeatIndex(temperatureC: number, humidity: number): numb
  * Converte o Ã­ndice de calor em nÃ­vel de alerta.
  * No perfil "trabalhador na rua" as faixas descem WORKER_PROFILE_OFFSET_C graus.
  */
-export function getAlertLevel(heatIndexC: number, useWorkerProfile: boolean): AlertLevel {
+export function getAlertLevel(heatIndexC: number, useWorkerProfile: boolean ): AlertLevel {
   const offset = useWorkerProfile ? WORKER_PROFILE_OFFSET_C : 0;
-  if (heatIndexC >= 52 - offset) {
+  if (heatIndexC >= 54 - offset) {
     return 'perigo_extremo';
   }
-  if (heatIndexC >= 39 - offset) {
+  if (heatIndexC >= 41 - offset) {
     return 'perigo';
   }
   if (heatIndexC >= 32 - offset) {
@@ -90,18 +90,17 @@ export function getAlertLevel(heatIndexC: number, useWorkerProfile: boolean): Al
   return 'normal';
 }
 
-/** Converte o Ã­ndice de qualidade do ar (1 a 5) em nÃ­vel de alerta. */
+/** Converte o índice de qualidade do ar (1 a 5) com peso reduzido no alerta combinado. */
 export function getAirQualityAlert(index: AirQualityIndex): AlertLevel {
   switch (index) {
     case 1:
     case 2:
-      return 'normal';
     case 3:
-      return 'atencao';
+      return 'normal';
     case 4:
-      return 'cuidado';
+      return 'atencao';
     case 5:
-      return 'perigo';
+      return 'cuidado';
   }
 }
 

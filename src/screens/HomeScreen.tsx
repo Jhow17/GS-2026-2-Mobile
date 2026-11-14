@@ -10,7 +10,7 @@ import {
   type CompositeNavigationProp,
 } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -31,6 +31,7 @@ import { Loading } from '../components/Loading';
 import { PermissionNotice } from '../components/PermissionNotice';
 import { WeatherSummary } from '../components/WeatherSummary';
 import { useLocation } from '../hooks/useLocation';
+import { useProfile } from '../hooks/useProfile';
 import { useSupportPoints } from '../hooks/useSupportPoints';
 import { useWeather } from '../hooks/useWeather';
 import { getAlertMessage } from '../services/heatIndexService';
@@ -48,7 +49,7 @@ type WeatherNavigation = CompositeNavigationProp<
 
 export function HomeScreen() {
   const navigation = useNavigation<WeatherNavigation>();
-  const [workerMode, setWorkerMode] = useState(true);
+  const { workerMode, setWorkerMode } = useProfile();
   const {
     coordinates,
     permission,
@@ -159,6 +160,11 @@ export function HomeScreen() {
         level={bundle.alert.combinedLevel}
         heatIndexC={bundle.alert.heatIndexC}
         message={getAlertMessage(bundle.alert.combinedLevel)}
+        airNote={
+          bundle.alert.combinedLevel !== bundle.alert.heatLevel
+            ? `Nível elevado pela qualidade do ar (${airQualityLabels[bundle.airQuality.index]}).`
+            : undefined
+        }
         updatedLabel={updatedLabel}
         nearestPoint={nearestPoint}
         onOpenNearestPoint={handleOpenNearestPoint}
@@ -174,7 +180,9 @@ export function HomeScreen() {
         <Switch
           accessibilityLabel="Alternar modo trabalho na rua"
           value={workerMode}
-          onValueChange={setWorkerMode}
+          onValueChange={(value) => {
+            void setWorkerMode(value);
+          }}
           trackColor={{ false: colors.borderStrong, true: colors.primaryLight }}
           thumbColor={workerMode ? colors.primary : colors.surface}
         />

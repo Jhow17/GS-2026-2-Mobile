@@ -46,6 +46,7 @@ export function TabRoutes() {
       initialRouteName="Start"
       screenOptions={({ route }) => ({
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: styles.tabBar,
