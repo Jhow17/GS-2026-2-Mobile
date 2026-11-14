@@ -24,6 +24,7 @@ interface AlertCardProps {
   heatIndexC: number;
   message: string;
   updatedLabel: string;
+  airNote?: string;
   nearestPoint?: {
     point: SupportPoint;
     distanceMeters: number | null;
@@ -36,6 +37,7 @@ export function AlertCard({
   heatIndexC,
   message,
   updatedLabel,
+  airNote,
   nearestPoint,
   onOpenNearestPoint,
 }: AlertCardProps) {
@@ -94,6 +96,9 @@ export function AlertCard({
         {formatHeatIndex(heatIndexC)}
       </Text>
       <Text style={[styles.message, { color: textColor }]}>{message}</Text>
+      {airNote ? (
+        <Text style={[styles.airNote, { color: textColor }]}>{airNote}</Text>
+      ) : null}
       <Text style={[styles.updated, { color: textColor }]}>{updatedLabel}</Text>
 
       {showProtectionButton ? (
@@ -182,6 +187,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.body,
     fontWeight: '600',
     lineHeight: 22,
+  },
+  airNote: {
+    marginTop: spacing.xxs,
+    fontSize: fontSize.caption,
+    fontWeight: '600',
+    opacity: 0.95,
   },
   updated: {
     marginTop: spacing.xxs,

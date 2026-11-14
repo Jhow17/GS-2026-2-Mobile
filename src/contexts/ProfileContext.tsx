@@ -17,9 +17,11 @@ import type { CitizenProfile, ProfileInput } from '../types/profile';
 
 export interface ProfileContextValue {
   profile: CitizenProfile | null;
+  workerMode: boolean;
   loading: boolean;
   saveProfile: (input: ProfileInput) => Promise<CitizenProfile>;
   clearProfile: () => Promise<void>;
+  setWorkerMode: (value: boolean) => Promise<void>;
 }
 
 export const ProfileContext = createContext<ProfileContextValue | null>(null);
@@ -31,15 +33,16 @@ interface ProfileProviderProps {
 export function ProfileProvider({ children }: ProfileProviderProps) {
   const { session, loading: authLoading } = useAuth();
   const [legacyProfile, setLegacyProfile] = useState<CitizenProfile | null>(null);
+  const [workerMode, setWorkerModeState] = useState<boolean>(false);
   const [storageLoading, setStorageLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
-    profileStorage
-      .getProfile()
-      .then((stored) => {
+    Promise.all([profileStorage.getProfile(), profileStorage.getWorkerMode()])
+      .then(([storedProfile, storedWorkerMode]) => {
         if (active) {
-          setLegacyProfile(stored);
+          setLegacyProfile(storedProfile);
+          setWorkerModeState(storedWorkerMode);
         }
       })
       .finally(() => {
@@ -78,14 +81,21 @@ export function ProfileProvider({ children }: ProfileProviderProps) {
     setLegacyProfile(null);
   }, []);
 
+  const setWorkerMode = useCallback(async (value: boolean): Promise<void> => {
+    setWorkerModeState(value);
+    await profileStorage.setWorkerMode(value);
+  }, []);
+
   const value = useMemo<ProfileContextValue>(
     () => ({
       profile: activeProfile,
+      workerMode,
       loading: authLoading || storageLoading,
       saveProfile,
       clearProfile,
+      setWorkerMode,
     }),
-    [activeProfile, authLoading, storageLoading, saveProfile, clearProfile],
+    [activeProfile, workerMode, authLoading, storageLoading, saveProfile, clearProfile, setWorkerMode],
   );
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
