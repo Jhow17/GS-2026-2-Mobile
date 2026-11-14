@@ -6,7 +6,7 @@
  * - Agenda notificações locais preditivas a partir das próximas faixas de 3h da previsão.
  */
 import * as Notifications from 'expo-notifications';
-import { Linking, Platform } from 'react-native';
+import { Linking, LogBox } from 'react-native';
 
 import type { LocationPermissionState } from '../types/location';
 import type { AlertLevel, WeatherBundle } from '../types/weather';
@@ -14,8 +14,13 @@ import { alertLevelLabels, formatHeatIndex, formatTime } from '../utils/formatte
 import { isRecord } from '../utils/validation';
 import { readStoredJson, STORAGE_PREFIX, writeStoredJson } from './cacheStorage';
 
+// Silencia apenas o aviso informativo do Expo Go sobre push remoto (usamos somente notificações locais)
+LogBox.ignoreLogs([
+  '[expo-notifications] Push notifications (remote notifications) are unavailable in Expo Go',
+  '`expo-notifications` functionality is not fully supported in Expo Go',
+]);
+
 const LAST_HEAT_ALERT_KEY = `${STORAGE_PREFIX}last_heat_alert`;
-const HEAT_CHANNEL_ID = 'heat-alerts';
 const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 horas
 const MAX_PREDICTIVE_SLOTS = 3;
 
@@ -74,9 +79,18 @@ export function shouldNotifyForLevel(level: AlertLevel, workerMode: boolean): bo
   return getSeverityRank(level) >= getSeverityRank(minLevel);
 }
 
-/** Inicializa o handler de primeiro plano e o canal de alta prioridade no Android. */
+/**
+ * Inicializa o handler de primeiro plano.
+ * Observação: no Android, não chamamos setNotificationChannelAsync via JS porque o
+ * serializador de retorno do ExpoNotificationChannelManager no SDK 58 lança NullPointerException
+ * em campos opcionais nulos; o BaseNotificationBuilder nativo já cria automaticamente o canal
+ * padrão com IMPORTANCE_HIGH, som e vibração ao agendar notificações locais.
+ */
 export async function ensureNotificationSetup(): Promise<void> {
-  if (!handlerInitialized) {
+  if (handlerInitialized) {
+    return;
+  }
+  try {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowBanner: true,
@@ -86,16 +100,8 @@ export async function ensureNotificationSetup(): Promise<void> {
       }),
     });
     handlerInitialized = true;
-  }
-
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync(HEAT_CHANNEL_ID, {
-      name: 'Alertas de Calor Extremo',
-      description: 'Avisos quando o índice de calor atinge níveis de risco para o trabalhador.',
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 200, 250],
-      sound: 'default',
-    });
+  } catch {
+    // Protege contra falha silenciosa de inicialização
   }
 }
 
@@ -137,13 +143,6 @@ export async function openNotificationSettings(): Promise<void> {
   await Linking.openSettings();
 }
 
-function buildImmediateTrigger(): Notifications.NotificationTriggerInput {
-  if (Platform.OS === 'android') {
-    return { channelId: HEAT_CHANNEL_ID };
-  }
-  return null;
-}
-
 /** Cancela todos os alertas preditivos agendados. */
 export async function cancelAllHeatNotifications(): Promise<void> {
   try {
@@ -163,101 +162,105 @@ export async function syncHeatNotifications(
   bundle: WeatherBundle,
   workerMode: boolean,
 ): Promise<void> {
-  const permission = await getNotificationPermissionState();
-  if (permission !== 'granted') {
-    return;
-  }
+  try {
+    const permission = await getNotificationPermissionState();
+    if (permission !== 'granted') {
+      return;
+    }
 
-  await ensureNotificationSetup();
+    await ensureNotificationSetup();
 
-  const currentLevel = bundle.alert.combinedLevel;
-  const currentHeatC = bundle.alert.heatIndexC;
-  const nowMs = Date.now();
+    const currentLevel = bundle.alert.combinedLevel;
+    const currentHeatC = bundle.alert.heatIndexC;
+    const nowMs = Date.now();
 
-  if (shouldNotifyForLevel(currentLevel, workerMode)) {
-    const lastAlert = await readStoredJson<LastHeatAlertRecord | null>(
-      LAST_HEAT_ALERT_KEY,
-      isLastHeatAlertRecord,
-      null,
-    );
+    if (shouldNotifyForLevel(currentLevel, workerMode)) {
+      const lastAlert = await readStoredJson<LastHeatAlertRecord | null>(
+        LAST_HEAT_ALERT_KEY,
+        isLastHeatAlertRecord,
+        null,
+      );
 
-    const lastTimeMs = lastAlert ? new Date(lastAlert.notifiedAt).getTime() : 0;
-    const elapsedMs = Number.isFinite(lastTimeMs) ? nowMs - lastTimeMs : COOLDOWN_MS + 1;
-    const escalated =
-      lastAlert !== null && getSeverityRank(currentLevel) > getSeverityRank(lastAlert.level);
+      const lastTimeMs = lastAlert ? new Date(lastAlert.notifiedAt).getTime() : 0;
+      const elapsedMs = Number.isFinite(lastTimeMs) ? nowMs - lastTimeMs : COOLDOWN_MS + 1;
+      const escalated =
+        lastAlert !== null && getSeverityRank(currentLevel) > getSeverityRank(lastAlert.level);
 
-    if (!lastAlert || elapsedMs >= COOLDOWN_MS || escalated) {
+      if (!lastAlert || elapsedMs >= COOLDOWN_MS || escalated) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `Alerta de ${alertLevelLabels[currentLevel]}: Índice de calor em ${formatHeatIndex(currentHeatC)}`,
+            body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no CitizenTech.',
+            data: { targetTab: 'Start', level: currentLevel },
+          },
+          trigger: null,
+        });
+
+        const nextRecord: LastHeatAlertRecord = {
+          level: currentLevel,
+          heatIndexC: currentHeatC,
+          notifiedAt: new Date(nowMs).toISOString(),
+        };
+        await writeStoredJson(LAST_HEAT_ALERT_KEY, nextRecord);
+      }
+    }
+
+    // Reagenda alertas preditivos para as próximas 24h (mesmo que o app seja fechado depois)
+    await cancelAllHeatNotifications();
+
+    const upcomingCriticalSlots = bundle.forecast
+      .filter((slot) => {
+        const slotMs = new Date(slot.at).getTime();
+        const inNext24h =
+          Number.isFinite(slotMs) &&
+          slotMs > nowMs + 5 * 60 * 1000 &&
+          slotMs <= nowMs + 24 * 60 * 60 * 1000;
+        return inNext24h && shouldNotifyForLevel(slot.level, workerMode);
+      })
+      .slice(0, MAX_PREDICTIVE_SLOTS);
+
+    for (const slot of upcomingCriticalSlots) {
+      const triggerDate = new Date(slot.at);
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: `Alerta de ${alertLevelLabels[currentLevel]}: Índice de calor em ${formatHeatIndex(currentHeatC)}`,
-          body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no CitizenTech.',
-          data: { targetTab: 'Start', level: currentLevel },
-          sound: 'default',
+          title: `Previsão de ${alertLevelLabels[slot.level]} às ${formatTime(slot.at)} (${formatHeatIndex(slot.heatIndexC)})`,
+          body: 'Prepare sua hidratação e planeje pausas nos pontos de apoio próximos.',
+          data: { targetTab: 'Start', level: slot.level },
         },
-        trigger: buildImmediateTrigger(),
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: triggerDate,
+        },
       });
-
-      const nextRecord: LastHeatAlertRecord = {
-        level: currentLevel,
-        heatIndexC: currentHeatC,
-        notifiedAt: new Date(nowMs).toISOString(),
-      };
-      await writeStoredJson(LAST_HEAT_ALERT_KEY, nextRecord);
     }
-  }
-
-  // Reagenda alertas preditivos para as próximas 24h (mesmo que o app seja fechado depois)
-  await cancelAllHeatNotifications();
-
-  const upcomingCriticalSlots = bundle.forecast
-    .filter((slot) => {
-      const slotMs = new Date(slot.at).getTime();
-      const inNext24h =
-        Number.isFinite(slotMs) &&
-        slotMs > nowMs + 5 * 60 * 1000 &&
-        slotMs <= nowMs + 24 * 60 * 60 * 1000;
-      return inNext24h && shouldNotifyForLevel(slot.level, workerMode);
-    })
-    .slice(0, MAX_PREDICTIVE_SLOTS);
-
-  for (const slot of upcomingCriticalSlots) {
-    const triggerDate = new Date(slot.at);
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: `Previsão de ${alertLevelLabels[slot.level]} às ${formatTime(slot.at)} (${formatHeatIndex(slot.heatIndexC)})`,
-        body: 'Prepare sua hidratação e planeje pausas nos pontos de apoio próximos.',
-        data: { targetTab: 'Start', level: slot.level },
-        sound: 'default',
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: triggerDate,
-        channelId: HEAT_CHANNEL_ID,
-      },
-    });
+  } catch {
+    // Evita Uncaught Promise caso o sistema operacional recuse o agendamento
   }
 }
 
 /** Dispara uma notificação imediata de demonstração para testar no aparelho. */
 export async function sendTestHeatNotification(bundle: WeatherBundle | null): Promise<boolean> {
-  const permission = await requestNotificationPermission();
-  if (permission !== 'granted') {
+  try {
+    const permission = await requestNotificationPermission();
+    if (permission !== 'granted') {
+      return false;
+    }
+
+    const level: AlertLevel = bundle?.alert.combinedLevel ?? 'perigo';
+    const heatIndexC = bundle?.alert.heatIndexC ?? 41.2;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `Alerta de ${alertLevelLabels[level]}: Índice de calor em ${formatHeatIndex(heatIndexC)}`,
+        body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no CitizenTech.',
+        data: { targetTab: 'Start', level },
+      },
+      trigger: null,
+    });
+    return true;
+  } catch {
     return false;
   }
-
-  const level: AlertLevel = bundle?.alert.combinedLevel ?? 'perigo';
-  const heatIndexC = bundle?.alert.heatIndexC ?? 41.2;
-
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: `Alerta de ${alertLevelLabels[level]}: Índice de calor em ${formatHeatIndex(heatIndexC)}`,
-      body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no CitizenTech.',
-      data: { targetTab: 'Start', level },
-      sound: 'default',
-    },
-    trigger: buildImmediateTrigger(),
-  });
-  return true;
 }
 
 /**
