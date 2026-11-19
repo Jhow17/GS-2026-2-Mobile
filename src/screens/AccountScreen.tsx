@@ -66,7 +66,7 @@ export function AccountScreen() {
             <View style={styles.avatarCircle}>
               <AppIcon name="user" size={28} color={colors.primary} />
             </View>
-            <Text style={styles.title}>Sua conta no CitizenTech</Text>
+            <Text style={styles.title}>Sua conta no TermoAtivapp</Text>
             <Text style={styles.subtitle}>
               Qualquer pessoa pode consultar alertas de calor e pontos de apoio
               sem login. Para sugerir novos locais, reportar bebedouros com

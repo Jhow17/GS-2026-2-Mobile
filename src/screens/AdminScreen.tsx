@@ -531,7 +531,7 @@ export function AdminScreen() {
           <EmptyState
             icon="lock"
             title="Acesso restrito à Administração"
-            message="Esta área é exclusiva para a conta de coordenação/administrador do CitizenTech."
+            message="Esta área é exclusiva para a conta de coordenação/administrador do TermoAtivapp."
             actionLabel="Entrar como Administrador"
             onAction={() =>
               navigation.navigate('Login', {

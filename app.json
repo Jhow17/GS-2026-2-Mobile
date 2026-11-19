@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CitizenTech",
+    "name": "TermoAtivapp",
     "slug": "citizentech",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,8 +9,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "O CitizenTech usa sua localização para mostrar o alerta de calor da sua região e os pontos de apoio próximos.",
-        "NSCameraUsageDescription": "O CitizenTech usa a câmera para fotografar pontos de apoio e bebedouros com defeito."
+        "NSLocationWhenInUseUsageDescription": "O TermoAtivapp usa sua localização para mostrar o alerta de calor da sua região e os pontos de apoio próximos.",
+        "NSCameraUsageDescription": "O TermoAtivapp usa a câmera para fotografar pontos de apoio e bebedouros com defeito."
       }
     },
     "android": {

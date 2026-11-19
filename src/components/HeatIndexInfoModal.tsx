@@ -87,7 +87,7 @@ export function HeatIndexInfoModal({
             ))}
 
             <Text style={styles.sectionTitle}>
-              As 5 faixas de alerta do CitizenTech
+              As 5 faixas de alerta do TermoAtivapp
             </Text>
             {HEAT_SCALE_LEVELS.map((scale) => {
               const bg = alertColors[scale.level];

@@ -76,7 +76,7 @@ function isAuthSession(value: unknown): value is AuthSession {
 function buildAdminSeedAccount(): UserAccount {
   return {
     id: ADMIN_ACCOUNT_ID,
-    name: 'Coordenação CitizenTech (Admin)',
+    name: 'Coordenação TermoAtivapp (Admin)',
     email: ADMIN_SEED_EMAIL,
     role: 'admin',
     cep: '01310-100',
@@ -117,11 +117,12 @@ export async function getAllAccounts(): Promise<UserAccount[]> {
     return next;
   }
 
-  // Sincroniza credenciais caso o .env tenha sido alterado
+  // Sincroniza credenciais ou nome caso tenham sido alterados
   const currentAdmin = stored[existingAdminIndex];
   if (
     currentAdmin &&
-    (currentAdmin.email !== adminAccount.email ||
+    (currentAdmin.name !== adminAccount.name ||
+      currentAdmin.email !== adminAccount.email ||
       currentAdmin.passwordHash !== adminAccount.passwordHash ||
       currentAdmin.role !== 'admin')
   ) {
@@ -137,11 +138,20 @@ export async function getAllAccounts(): Promise<UserAccount[]> {
 /** Lê a sessão ativa persistida (ou null se deslogado). */
 export async function getStoredSession(): Promise<AuthSession | null> {
   await getAllAccounts();
-  return readStoredJson<AuthSession | null>(
+  const session = await readStoredJson<AuthSession | null>(
     SESSION_KEY,
     (val): val is AuthSession | null => val === null || isAuthSession(val),
     null,
   );
+  if (session && session.userId === ADMIN_ACCOUNT_ID && session.name !== 'Coordenação TermoAtivapp (Admin)') {
+    const updatedSession: AuthSession = {
+      ...session,
+      name: 'Coordenação TermoAtivapp (Admin)',
+    };
+    await writeStoredJson(SESSION_KEY, updatedSession);
+    return updatedSession;
+  }
+  return session;
 }
 
 export class AuthError extends Error {

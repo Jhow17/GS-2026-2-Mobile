@@ -1,6 +1,6 @@
 # DECISÕES TÉCNICAS E LIMITES DA PROVA DE CONCEITO
 
-Este documento registra as escolhas arquiteturais, os algoritmos adotados e os limites conhecidos do **CitizenTech**, mantendo o código enxuto, legível e fiel aos padrões da disciplina (**Expo SDK 58**, **TypeScript estrito** com validação `unknown`, `StyleSheet.create` e separação rigorosa entre `screens`, `components`, `contexts`, `hooks`, `services`, `types`, `utils` e `theme`).
+Este documento registra as escolhas arquiteturais, os algoritmos adotados e os limites conhecidos do **TermoAtivapp**, mantendo o código enxuto, legível e fiel aos padrões da disciplina (**Expo SDK 58**, **TypeScript estrito** com validação `unknown`, `StyleSheet.create` e separação rigorosa entre `screens`, `components`, `contexts`, `hooks`, `services`, `types`, `utils` e `theme`).
 
 ---
 
