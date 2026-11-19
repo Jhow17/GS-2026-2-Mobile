@@ -1,4 +1,4 @@
-# CitizenTech — Apoio Térmico Urbano para Trabalhadores Conectados
+# Mobile TermoAtiva — Apoio Térmico Urbano para Trabalhadores Conectados
 
 ## Objetivo do Projeto
 
