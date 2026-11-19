@@ -190,7 +190,7 @@ export async function syncHeatNotifications(
         await Notifications.scheduleNotificationAsync({
           content: {
             title: `Alerta de ${alertLevelLabels[currentLevel]}: Índice de calor em ${formatHeatIndex(currentHeatC)}`,
-            body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no CitizenTech.',
+            body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no TermoAtivapp.',
             data: { targetTab: 'Start', level: currentLevel },
           },
           trigger: null,
@@ -252,7 +252,7 @@ export async function sendTestHeatNotification(bundle: WeatherBundle | null): Pr
     await Notifications.scheduleNotificationAsync({
       content: {
         title: `Alerta de ${alertLevelLabels[level]}: Índice de calor em ${formatHeatIndex(heatIndexC)}`,
-        body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no CitizenTech.',
+        body: 'Faça pausas longas na sombra, hidrate-se e veja o ponto de apoio mais próximo no TermoAtivapp.',
         data: { targetTab: 'Start', level },
       },
       trigger: null,

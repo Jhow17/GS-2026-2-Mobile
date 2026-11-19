@@ -107,7 +107,7 @@ export function LoginScreen({ route, navigation }: Props) {
           <View style={styles.iconBadge}>
             <AppIcon name="log-in" size={24} color={colors.primary} />
           </View>
-          <Text style={styles.title}>Entrar no CitizenTech</Text>
+          <Text style={styles.title}>Entrar no TermoAtivapp</Text>
           <Text style={styles.subtitle}>
             Acesse sua conta para cadastrar pontos de apoio, relatar bebedouros
             com defeito ou gerenciar seus locais.
@@ -153,7 +153,7 @@ export function LoginScreen({ route, navigation }: Props) {
 
         <View style={styles.registerPromptCard}>
           <Text style={styles.registerPromptText}>
-            Ainda não tem uma conta no CitizenTech?
+            Ainda não tem uma conta no TermoAtivapp?
           </Text>
           <CustomButton
             title="Criar conta gratuita"

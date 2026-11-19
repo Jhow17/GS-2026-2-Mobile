@@ -206,7 +206,7 @@ export function StartScreen() {
       {/* Barra superior com identificação do usuário ou botão Entrar */}
       <View style={styles.topBar}>
         <View style={styles.brandBlock}>
-          <Text style={styles.brandTitle}>CitizenTech</Text>
+          <Text style={styles.brandTitle}>TermoAtivapp</Text>
           <Text style={styles.brandSubtitle}>
             Apoio térmico urbano · {bundle?.current.name ?? 'São Paulo'}
           </Text>

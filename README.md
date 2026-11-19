@@ -1,8 +1,8 @@
-# Mobile TermoAtiva — Apoio Térmico Urbano para Trabalhadores Conectados
+# TermoAtivapp — Apoio Térmico Urbano para Trabalhadores Conectados
 
 ## Objetivo do Projeto
 
-O **CitizenTech** é um aplicativo mobile desenvolvido em **React Native (Expo SDK 58)** com **TypeScript, projetado como uma ferramenta de bolso para **entregadores, ciclistas, motociclistas, trabalhadores ao ar livre e cidadãos** enfrentarem ondas de calor extremo nos grandes centros urbanos (com foco inicial em São Paulo).
+O **TermoAtivapp** é um aplicativo mobile desenvolvido em **React Native (Expo SDK 58)** com **TypeScript estrito (`strict: true`)**, projetado como uma ferramenta de bolso para **entregadores, ciclistas, motociclistas, trabalhadores ao ar livre e cidadãos** enfrentarem ondas de calor extremo nos grandes centros urbanos (com foco inicial em São Paulo).
 
 O projeto funciona é inicialmente um MVP funcionando **100% no cliente (*client-side*)**, combinando dados meteorológicos e de qualidade do ar em tempo real da **OpenWeather**, cálculo do **Índice de Calor (equação de Rothfusz / NOAA)**, **notificações locais e preditivas de risco térmico** e uma **rede colaborativa e moderada de pontos de apoio** (bebedouros públicos, áreas de sombra, espaços de descanso e pontos parceiros).
 
